@@ -6,3 +6,9 @@ venv/
 output/
 *.mp4
 .DS_Store
+smoketest/
+run*.log
+run*.err
+result.json
+highlights*.json
+render_*.py
