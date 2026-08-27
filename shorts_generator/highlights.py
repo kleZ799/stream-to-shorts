@@ -39,6 +39,45 @@ Virality signals to prioritize (ranked by impact):
 """
 
 
+STREAM_VIRALITY_CRITERIA = """
+This transcript is a raw LIVE STREAM VOD of someone playing a story-heavy video
+game. The audio is a single mixed track: the streamer's microphone AND the
+game's own scripted narration/dialogue are transcribed together, with no labels.
+
+Telling them apart:
+- GAME NARRATION reads like written prose — literary, past tense, polished, no
+  filler words, no self-correction, never addresses anyone directly.
+- THE STREAMER sounds spoken — reactions, filler words, false starts, laughter,
+  swearing, questions, addressing chat, commenting on what just happened.
+
+HARD REQUIREMENT: every highlight MUST contain the streamer's own speech.
+A clip of pure game narration is worthless — the audience follows the streamer,
+and that footage belongs to the game, not the channel. A story beat is only
+clippable when the streamer reacts to it, talks over it, or responds after it.
+
+Virality signals to prioritize (ranked by impact):
+1. REACTION TO A STORY BEAT — the game lands an emotional hit and the streamer
+   audibly responds: shock, silence broken by a swear, laughter, genuine sadness
+2. RAW REACTION MOMENTS — unscripted spikes of any kind: confusion, rage, delight
+3. FAILS & DISASTERS — something goes wrong live and the streamer responds
+4. HOT TAKES & RANTS — unfiltered opinions about the game, the story, anything
+5. CHAT INTERACTION — answering a question, reacting to a donation or troll
+6. PERSONAL TANGENTS — an off-topic story from the streamer's own life
+7. QUOTABLE ONE-LINERS — a streamer line that works as a caption or meme
+8. SINCERITY — an unguarded, genuinely felt moment of reflection
+
+Hard rules for stream VODs:
+- SKIP dead air, loading screens, technical difficulties, and stream housekeeping
+- SKIP anything requiring 10 minutes of prior context — it must land for a stranger
+- Start 2-5 seconds BEFORE the moment so the payoff has setup, never after
+- If a span is entirely game narration with no streamer speech, DO NOT return it
+"""
+
+# Which criteria block gets injected into the highlight prompt.
+# Swap to VIRALITY_CRITERIA for edited/long-form content.
+ACTIVE_VIRALITY_CRITERIA = STREAM_VIRALITY_CRITERIA
+
+
 HIGHLIGHT_SYSTEM_PROMPT = """You are an elite short-form video editor who has studied thousands of viral clips on TikTok, Instagram Reels, and YouTube Shorts. You know exactly what makes viewers stop scrolling, watch to the end, and share.
 
 {virality_criteria}
@@ -49,7 +88,7 @@ Your task: identify the most viral-worthy highlights from the transcript.
 
 Rules:
 - Every highlight must open with a strong HOOK — a line that grabs attention within the first 3 seconds
-- Duration sweet spot: 45-90 seconds. Go shorter (20-44s) only for a perfect standalone one-liner. Go longer (91-180s) only when a story arc needs full context to land
+- Duration: TARGET 30-60 seconds. This is a hard preference — short clips finish, and completion rate is what the algorithm rewards. Go to 20-29s for a perfect standalone one-liner. NEVER exceed 75 seconds
 - Never cut mid-sentence or mid-thought — each clip must feel complete and self-contained
 - Clips must not overlap significantly with each other
 - Score 0-100 on viral potential (not general quality)
@@ -61,6 +100,7 @@ Respond ONLY with valid JSON (no markdown, no explanation):
 {{"highlights":[{{"title":"string","start_time":float,"end_time":float,"score":int,"hook_sentence":"string","virality_reason":"string"}}]}}"""
 
 
+MAX_CLIP_SECONDS = 90         # reject anything the model returns above this
 CHUNK_SIZE_SECONDS = 1200       # 20-min chunks for long videos
 LONG_VIDEO_THRESHOLD = 1800     # chunk videos longer than 30 min
 CHUNK_OVERLAP_SECONDS = 60
@@ -140,6 +180,9 @@ def _sanitize_highlights(raw_highlights: object, duration: float) -> List[Dict]:
         if start < 0 or end <= start:
             continue
 
+        if (end - start) > MAX_CLIP_SECONDS:
+            continue
+
         if max_end != float("inf"):
             start = min(start, max_end)
             end = min(end, max_end)
@@ -188,8 +231,15 @@ def chunk_transcript(transcript: Dict) -> List[Dict]:
             if s["start"] >= start and s["end"] <= end + CHUNK_OVERLAP_SECONDS
         ]
         if chunk_segs:
+            # Rebase segment times to the chunk so they match the relative
+            # duration we pass as the clamp bound; get_highlights adds _offset
+            # back afterwards. Without this, chunks after the first hand the
+            # model absolute timestamps that then get clamped away entirely.
             chunk = dict(transcript)
-            chunk["segments"] = chunk_segs
+            chunk["segments"] = [
+                {**seg, "start": seg["start"] - start, "end": seg["end"] - start}
+                for seg in chunk_segs
+            ]
             chunk["duration"] = end - start
             chunk["_offset"] = start
             chunks.append(chunk)
@@ -211,7 +261,7 @@ def call_highlight_api(
     natural_max = max(2 if is_chunk else 3, int(duration / 90))
     min_clips = min(target, natural_max, 8)
     system = HIGHLIGHT_SYSTEM_PROMPT.format(
-        virality_criteria=VIRALITY_CRITERIA,
+        virality_criteria=ACTIVE_VIRALITY_CRITERIA,
         content_type=content_info.get("content_type", "other"),
         density=content_info.get("density", "medium"),
         num_clips_instruction=f"Generate at least {min_clips} highlights",
