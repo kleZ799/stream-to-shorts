@@ -8,9 +8,28 @@ Two stages per highlight:
 """
 import os
 import subprocess
+import time
 from typing import Dict, List, Optional, Tuple
 
-from ..config import LOCAL_OUTPUT_DIR
+from ..config import LOCAL_OUTPUT_DIR, LOCAL_OUTPUT_RESOLUTION
+
+
+def _safe_remove(path: str, attempts: int = 5) -> None:
+    """Delete a temp file, tolerating Windows' lazy handle release.
+
+    Cleanup must never raise: on Windows a lingering handle turns a real
+    encoding error into a confusing WinError 32 from the finally block.
+    """
+    for i in range(attempts):
+        try:
+            if os.path.exists(path):
+                os.remove(path)
+            return
+        except OSError:
+            if i == attempts - 1:
+                print(f"[clip/local] warning: could not delete temp file {path}", flush=True)
+                return
+            time.sleep(0.3)
 
 
 def _ratio(aspect_ratio: str) -> float:
@@ -29,7 +48,9 @@ def _cut_subclip(source_path: str, start: float, end: float, out_path: str) -> s
         "-i", source_path,
         "-ss", f"{start:.3f}",
         "-to", f"{end:.3f}",
-        "-c:v", "libx264", "-preset", "fast", "-crf", "20",
+        # Intermediate only — the reframe step re-encodes this, so favour speed
+        # at near-transparent quality instead of spending time on compression.
+        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "18",
         "-c:a", "aac", "-b:a", "128k",
         out_path,
     ]
@@ -71,54 +92,79 @@ def _reframe_vertical(in_path: str, out_path: str, aspect_ratio: str) -> str:
     silent_path = out_path + ".silent.mp4"
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
     writer = cv2.VideoWriter(silent_path, fourcc, fps, (crop_w, crop_h))
+    if not writer.isOpened():
+        cap.release()
+        raise RuntimeError(
+            f"OpenCV could not open a writer for {crop_w}x{crop_h} @ {fps:.0f}fps"
+        )
+
+    # Haar detection at full 1440p costs more than the rest of the pipeline
+    # combined; detect on a downscaled copy and scale the result back up.
+    detect_scale = 640.0 / src_w if src_w > 640 else 1.0
 
     last_center: Optional[Tuple[int, int]] = None
     smoothing = 0.15  # how aggressively to chase a new face position
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
+    try:
+      while True:
+          ret, frame = cap.read()
+          if not ret:
+              break
 
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(40, 40))
-        if len(faces) > 0:
-            # Pick the largest face — usually the speaker.
-            x, y, w, h = max(faces, key=lambda f: f[2] * f[3])
-            cx = x + w // 2
-            cy = y + h // 2
-            if last_center is None:
-                last_center = (cx, cy)
-            else:
-                lx, ly = last_center
-                last_center = (
-                    int(lx + (cx - lx) * smoothing),
-                    int(ly + (cy - ly) * smoothing),
-                )
-        if last_center is None:
-            last_center = (src_w // 2, src_h // 2)
+          gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+          if detect_scale < 1.0:
+              gray = cv2.resize(gray, None, fx=detect_scale, fy=detect_scale)
+          faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(40, 40))
+          if len(faces) > 0:
+              # Pick the largest face — usually the speaker.
+              x, y, w, h = max(faces, key=lambda f: f[2] * f[3])
+              cx = int((x + w // 2) / detect_scale)
+              cy = int((y + h // 2) / detect_scale)
+              if last_center is None:
+                  last_center = (cx, cy)
+              else:
+                  lx, ly = last_center
+                  last_center = (
+                      int(lx + (cx - lx) * smoothing),
+                      int(ly + (cy - ly) * smoothing),
+                  )
+          if last_center is None:
+              last_center = (src_w // 2, src_h // 2)
 
-        cx, cy = last_center
-        x0 = max(0, min(src_w - crop_w, cx - crop_w // 2))
-        y0 = max(0, min(src_h - crop_h, cy - crop_h // 2))
-        cropped = frame[y0:y0 + crop_h, x0:x0 + crop_w]
-        writer.write(cropped)
-
-    cap.release()
-    writer.release()
+          cx, cy = last_center
+          x0 = max(0, min(src_w - crop_w, cx - crop_w // 2))
+          y0 = max(0, min(src_h - crop_h, cy - crop_h // 2))
+          # .copy() makes the slice contiguous — OpenCV's writer throws an
+          # opaque C++ exception on the non-contiguous view at high resolution.
+          cropped = frame[y0:y0 + crop_h, x0:x0 + crop_w].copy()
+          writer.write(cropped)
+    finally:
+        # Windows keeps the file locked until both handles are closed, which
+        # would otherwise make the temp-file cleanup fail and mask this error.
+        cap.release()
+        writer.release()
 
     # Mux audio from the cut clip back onto the silent reframed video.
+    scale_args: List[str] = []
+    if LOCAL_OUTPUT_RESOLUTION:
+        w, h = LOCAL_OUTPUT_RESOLUTION.split("x")
+        # lanczos preserves detail on the upscale from the native crop size
+        scale_args = ["-vf", f"scale={int(w)}:{int(h)}:flags=lanczos"]
+
     cmd = [
         "ffmpeg", "-y", "-loglevel", "error",
         "-i", silent_path,
         "-i", in_path,
-        "-c:v", "copy",
+        *scale_args,
+        # OpenCV writes mpeg4; re-encode to h264 so the upload is accepted
+        # everywhere (Shorts / Reels / TikTok) without a lossy server-side pass.
+        "-c:v", "libx264", "-preset", "fast", "-crf", "20", "-pix_fmt", "yuv420p",
         "-c:a", "aac", "-b:a", "128k",
         "-map", "0:v:0", "-map", "1:a:0?",
         "-shortest",
         out_path,
     ]
     subprocess.run(cmd, check=True)
-    os.remove(silent_path)
+    _safe_remove(silent_path)
     return out_path
 
 
@@ -135,8 +181,7 @@ def crop_clip_local(
         _cut_subclip(source_path, start_time, end_time, cut_path)
         _reframe_vertical(cut_path, out_path, aspect_ratio)
     finally:
-        if os.path.exists(cut_path):
-            os.remove(cut_path)
+        _safe_remove(cut_path)
     return out_path
 
 

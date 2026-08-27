@@ -20,6 +20,10 @@ LOCAL_WHISPER_MODEL = os.getenv("LOCAL_WHISPER_MODEL", "base")
 LOCAL_WHISPER_DEVICE = os.getenv("LOCAL_WHISPER_DEVICE", "auto")  # auto / cpu / cuda
 LOCAL_OUTPUT_DIR = os.getenv("LOCAL_OUTPUT_DIR", "output")
 
+# Optional final upscale/downscale of each rendered short, e.g. "1080x1920" to
+# hit YouTube Shorts / Reels spec exactly. Empty = keep the native crop size.
+LOCAL_OUTPUT_RESOLUTION = os.getenv("LOCAL_OUTPUT_RESOLUTION", "").strip().lower()
+
 # VAD (Voice Activity Detection) settings for faster-whisper
 # Default threshold is 0.5; lower = more sensitive, higher = less sensitive
 # Default min_speech_duration_ms is 250ms; increase to avoid tiny false positives
