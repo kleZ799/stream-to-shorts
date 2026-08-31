@@ -18,13 +18,59 @@ from typing import Dict, List, Optional
 import json
 import re
 
-# aspect ratio -> (width, height). Values are the platform-native upload sizes.
+# aspect ratio -> (width, height). Values are the platform-native upload sizes,
+# used as the floor. When the source can support more, pick_output_size() moves
+# up the ladder for that ratio instead.
 ASPECT_PRESETS: Dict[str, tuple] = {
     "9:16": (1080, 1920),   # Shorts / Reels / TikTok
     "4:5": (1080, 1350),    # Instagram feed portrait
     "1:1": (1080, 1080),    # square
     "16:9": (1920, 1080),   # landscape
 }
+
+# Standard sizes per ratio, smallest first. We climb these while the source
+# still has the pixels to justify it — never past what the crop actually holds.
+QUALITY_LADDER: Dict[str, List[tuple]] = {
+    "9:16": [(1080, 1920), (1440, 2560), (2160, 3840)],
+    "4:5": [(1080, 1350), (1440, 1800), (2160, 2700)],
+    "1:1": [(1080, 1080), (1440, 1440), (2160, 2160)],
+    "16:9": [(1920, 1080), (2560, 1440), (3840, 2160)],
+}
+
+
+def pick_output_size(src_w: int, src_h: int, aspect_ratio: str,
+                     layout: str = "stacked") -> tuple:
+    """Largest standard size the source genuinely supports for this ratio.
+
+    Upscaling past what the source holds only inflates the file — it adds no
+    detail. So we measure the crop we're actually going to take, then climb the
+    ladder as far as that crop's real pixels justify, and no further.
+    """
+    ladder = QUALITY_LADDER.get(aspect_ratio, QUALITY_LADDER["9:16"])
+    if src_w <= 0 or src_h <= 0:
+        return ladder[0]
+
+    base_w, base_h = ladder[0]
+    target = base_w / base_h
+
+    # The gameplay/centre crop is the panel that carries the detail. In the
+    # stacked layout it only occupies the lower portion of the output.
+    from_h = src_h
+    from_w = min(int(from_h * target), src_w)
+    if layout == "stacked":
+        # The bottom panel is ~58% of output height but still sourced from the
+        # full frame height, so it has proportionally more pixels to give.
+        from_w = min(int(src_h * (base_w / (base_h * 0.58))), src_w)
+
+    best = ladder[0]
+    for w, h in ladder:
+        # Allow a standard size if the crop supplies at least ~85% of its
+        # width; below that we would be inventing pixels.
+        if from_w >= w * 0.85:
+            best = (w, h)
+        else:
+            break
+    return best
 
 LAYOUTS = ("stacked", "facetrack", "center")
 CORNERS = ("bottom-left", "bottom-right", "top-left", "top-right")
@@ -40,6 +86,9 @@ class LayoutSpec:
     cam_panel_fraction: float = 0.42
     face_zoom: float = 5.0
     num_clips: int = 5
+    # Render at the best size the source actually supports rather than the
+    # platform-minimum preset. Off means always use ASPECT_PRESETS.
+    match_source_quality: bool = True
     # Explicit [start, end] spans in seconds. When present, the pipeline cuts
     # exactly these and skips transcription and AI ranking entirely.
     time_ranges: List[List[float]] = field(default_factory=list)

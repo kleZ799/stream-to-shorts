@@ -84,17 +84,31 @@ def render_highlights(
     the same shape every renderer in this repo already produces.
     """
     from .config import LOCAL_OUTPUT_DIR
+    from .layout_spec import pick_output_size
+    from .local.gaming_layout import _probe_dimensions
 
     out_dir = out_dir or LOCAL_OUTPUT_DIR
     os.makedirs(out_dir, exist_ok=True)
-    print(f"[render] {spec.layout} · {spec.describe()}", flush=True)
+
+    out_w, out_h = spec.width, spec.height
+    if spec.match_source_quality:
+        try:
+            src_w, src_h = _probe_dimensions(source_path)
+            out_w, out_h = pick_output_size(src_w, src_h, spec.aspect_ratio, spec.layout)
+            if (out_w, out_h) != (spec.width, spec.height):
+                print(f"[render] source is {src_w}x{src_h} — rendering at "
+                      f"{out_w}x{out_h} instead of {spec.width}x{spec.height}", flush=True)
+        except Exception as e:
+            print(f"[render] could not probe source ({e}); using {out_w}x{out_h}", flush=True)
+
+    print(f"[render] {spec.layout} · {spec.describe()} · {out_w}x{out_h}", flush=True)
 
     if spec.layout == "stacked":
         from .local.gaming_layout import render_stacked_highlights
         return render_stacked_highlights(
             source_path, highlights, out_dir=out_dir,
             corner=spec.webcam_corner,
-            out_w=spec.width, out_h=spec.height,
+            out_w=out_w, out_h=out_h,
             cam_panel_fraction=spec.cam_panel_fraction,
             face_context_multiple=spec.face_zoom,
             name_prefix=name_prefix,
@@ -106,10 +120,10 @@ def render_highlights(
             source_path, highlights,
             aspect_ratio=spec.aspect_ratio,
             out_dir=out_dir,
-            target_resolution=f"{spec.width}x{spec.height}",
+            target_resolution=f"{out_w}x{out_h}",
             name_prefix=name_prefix,
         )
 
     return _render_center_highlights(
-        source_path, highlights, out_dir, spec.width, spec.height, name_prefix=name_prefix
+        source_path, highlights, out_dir, out_w, out_h, name_prefix=name_prefix
     )
