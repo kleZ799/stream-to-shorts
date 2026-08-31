@@ -22,7 +22,7 @@ from typing import Dict, List, Optional
 
 from shorts_generator.layout_spec import LayoutSpec
 
-JOBS_DIR = os.path.join("webapp_output")
+from shorts_generator import user_config
 
 
 def _fmt_clock(seconds: float) -> str:
@@ -72,6 +72,7 @@ class Job:
     progress: float = 0.0
     message: str = "Queued"
     error: Optional[str] = None
+    source_path: Optional[str] = None
     clips: List[Dict] = field(default_factory=list)
     highlights: List[Dict] = field(default_factory=list)
     log: List[str] = field(default_factory=list)
@@ -80,7 +81,8 @@ class Job:
 
     @property
     def out_dir(self) -> str:
-        return os.path.join(JOBS_DIR, self.id)
+        # Resolved live, so changing the save location takes effect immediately.
+        return str(user_config.shorts_dir() / self.id)
 
     def snapshot(self) -> Dict:
         return {
@@ -94,6 +96,8 @@ class Job:
             "spec": self.spec.to_dict(),
             "spec_summary": self.spec.describe(),
             "clips": self.clips,
+            "source_path": self.source_path,
+            "shorts_dir": self.out_dir,
             "log": self.log[-60:],
             "version": self._version,
         }
@@ -202,7 +206,13 @@ class JobStore:
 
         sink = _JobStdout(self, job)
         with contextlib.redirect_stdout(sink):
-            source_path = download_youtube_local(job.source, fmt=job.download_format)
+            source_path = download_youtube_local(
+                job.source, fmt=job.download_format,
+                out_dir=str(user_config.source_dir()),
+            )
+            with self._lock:
+                job.source_path = source_path
+                job._version += 1
 
             # Explicit spans: the user already told us what to cut, so there is
             # nothing to transcribe and nothing to rank. Straight to rendering.

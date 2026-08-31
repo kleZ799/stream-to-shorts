@@ -61,6 +61,56 @@ def get(key: str, default: str = "") -> str:
     return str(val).strip() if val else default
 
 
+# Where things land under the chosen root. Source videos keep the historical
+# "output" name so transcripts already cached beside them stay valid.
+SOURCE_SUBDIR = "output"
+SHORTS_SUBDIR = "shorts"
+
+
+def output_root() -> Path:
+    """Root folder for everything this app writes. Defaults to the cwd."""
+    configured = get("OUTPUT_ROOT")
+    if configured:
+        return Path(configured).expanduser()
+    return Path.cwd()
+
+
+def set_output_root(path: str) -> Path:
+    """Point the app at a new save location, after proving we can write there."""
+    p = Path(path).expanduser()
+    if p.exists() and not p.is_dir():
+        raise ValueError(f"{p} is a file, not a folder.")
+    try:
+        p.mkdir(parents=True, exist_ok=True)
+        probe = p / ".stream-to-shorts-write-test"
+        probe.write_text("ok", encoding="utf-8")
+        probe.unlink()
+    except OSError as e:
+        raise ValueError(f"Can't write to {p} ({e.strerror or e}).") from e
+
+    resolved = p.resolve()
+    save({"OUTPUT_ROOT": str(resolved)})
+    return resolved
+
+
+def source_dir() -> Path:
+    """Where full downloaded videos and their transcripts live."""
+    raw = os.getenv("LOCAL_OUTPUT_DIR", "").strip()
+    if raw and Path(raw).is_absolute():
+        d = Path(raw)
+    else:
+        d = output_root() / (raw or SOURCE_SUBDIR)
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def shorts_dir() -> Path:
+    """Where generated clips live, one subfolder per run."""
+    d = output_root() / SHORTS_SUBDIR
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
 def has_llm_key() -> bool:
     provider = (get("LLM_PROVIDER", "gemini") or "gemini").lower()
     if provider == "openai":

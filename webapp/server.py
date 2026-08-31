@@ -127,6 +127,81 @@ async def set_settings(req: SettingsRequest) -> dict:
             "has_key": user_config.has_llm_key()}
 
 
+class LocationRequest(BaseModel):
+    path: str
+
+
+class RevealRequest(BaseModel):
+    path: str
+
+
+@app.get("/api/locations")
+async def get_locations() -> dict:
+    from shorts_generator import user_config
+
+    return {
+        "root": str(user_config.output_root()),
+        "source": str(user_config.source_dir()),
+        "shorts": str(user_config.shorts_dir()),
+    }
+
+
+@app.post("/api/locations")
+async def set_location(req: LocationRequest) -> dict:
+    """Move where future videos are saved. Existing files stay put."""
+    from shorts_generator import user_config
+
+    path = (req.path or "").strip().strip('"')
+    if not path:
+        raise HTTPException(400, "Enter a folder path.")
+    try:
+        root = await asyncio.to_thread(user_config.set_output_root, path)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+    return {
+        "saved": True,
+        "root": str(root),
+        "source": str(user_config.source_dir()),
+        "shorts": str(user_config.shorts_dir()),
+    }
+
+
+@app.post("/api/reveal")
+async def reveal(req: RevealRequest) -> dict:
+    """Open a folder in the OS file manager.
+
+    Only paths inside the configured save location are allowed — this runs a
+    local command, so it must never be steerable to an arbitrary path.
+    """
+    import subprocess
+    import sys as _sys
+    from shorts_generator import user_config
+
+    target = Path(req.path or "").expanduser()
+    if not target.exists():
+        raise HTTPException(404, "That folder doesn't exist yet.")
+    if target.is_file():
+        target = target.parent
+
+    root = user_config.output_root().resolve()
+    try:
+        target.resolve().relative_to(root)
+    except ValueError:
+        raise HTTPException(403, "That folder is outside your save location.")
+
+    try:
+        if os.name == "nt":
+            os.startfile(str(target))       # noqa: S606 - local desktop app
+        elif _sys.platform == "darwin":
+            subprocess.run(["open", str(target)], check=True)
+        else:
+            subprocess.run(["xdg-open", str(target)], check=True)
+    except Exception as e:
+        raise HTTPException(500, f"Could not open the folder: {e}")
+    return {"opened": str(target)}
+
+
 @app.post("/api/layout/preview")
 async def layout_preview(req: LayoutPreviewRequest) -> dict:
     """Parse a layout prompt without running anything, so the UI can show
