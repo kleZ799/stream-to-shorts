@@ -77,6 +77,56 @@ async def options() -> dict:
     }
 
 
+class SettingsRequest(BaseModel):
+    provider: str = "gemini"
+    api_key: str = ""
+    model: Optional[str] = None
+
+
+@app.get("/api/settings")
+async def get_settings() -> dict:
+    """What the UI needs to decide whether to show first-run setup.
+
+    Never returns the key itself — only whether one is present, and where
+    it came from, so the user knows which knob actually controls it.
+    """
+    from shorts_generator import user_config
+    from shorts_generator.config import current_model, current_provider
+
+    provider = current_provider()
+    from_env = bool(os.getenv("GEMINI_API_KEY") or os.getenv("OPENAI_API_KEY"))
+    return {
+        "has_key": user_config.has_llm_key(),
+        "provider": provider,
+        "model": current_model(provider),
+        "source": "environment" if from_env else "settings file",
+        "config_path": str(user_config.config_path()),
+        "ffmpeg": shutil.which("ffmpeg") is not None,
+    }
+
+
+@app.post("/api/settings")
+async def set_settings(req: SettingsRequest) -> dict:
+    from shorts_generator import user_config
+
+    provider = (req.provider or "gemini").strip().lower()
+    if provider not in ("gemini", "openai"):
+        raise HTTPException(400, "Provider must be 'gemini' or 'openai'.")
+
+    key = (req.api_key or "").strip()
+    if not key:
+        raise HTTPException(400, "Paste an API key first.")
+
+    values = {"LLM_PROVIDER": provider}
+    values["GEMINI_API_KEY" if provider == "gemini" else "OPENAI_API_KEY"] = key
+    if req.model:
+        values["GEMINI_MODEL" if provider == "gemini" else "OPENAI_MODEL"] = req.model.strip()
+
+    path = user_config.save(values)
+    return {"saved": True, "config_path": str(path),
+            "has_key": user_config.has_llm_key()}
+
+
 @app.post("/api/layout/preview")
 async def layout_preview(req: LayoutPreviewRequest) -> dict:
     """Parse a layout prompt without running anything, so the UI can show

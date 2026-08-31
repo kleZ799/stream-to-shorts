@@ -15,6 +15,24 @@
     <p class="sub">Drop a VOD or paste a link. Describe the layout you want in plain English. Get vertical clips back.</p>
   </header>
 
+  <div class="card hidden" id="setup" style="margin-bottom:18px">
+    <h2>Setup — one time</h2>
+    <p class="setup-lead">This runs on your machine and needs one free API key to pick the best moments.</p>
+    <label class="fld">
+      <span>Provider</span>
+      <select id="setProvider">
+        <option value="gemini" selected>Google Gemini — free tier</option>
+        <option value="openai">OpenAI</option>
+      </select>
+    </label>
+    <label class="fld">
+      <span>API key <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener" id="keyLink">Get a free Gemini key →</a></span>
+      <input type="password" id="setKey" placeholder="Paste your key here">
+    </label>
+    <button class="go" id="setSave">Save and continue</button>
+    <div id="setMsg"></div>
+  </div>
+
   <div class="grid">
 
     <!-- ============ LEFT: input ============ -->

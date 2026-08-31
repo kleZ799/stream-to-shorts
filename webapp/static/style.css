@@ -410,3 +410,27 @@ button.ghost:hover { border-color: var(--accent); }
 }
 .exact-box b { display: block; margin-bottom: 5px; color: var(--ok); font-size: 12px; }
 .exact-box span { color: var(--muted); }
+
+.setup-lead { color: var(--muted); font-size: 13.5px; margin-bottom: 14px; }
+label.fld > span a { color: #a48cff; text-decoration: none; float: right; font-size: 12.5px; }
+label.fld > span a:hover { text-decoration: underline; }
+input[type=password] {
+  width: 100%;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--text);
+  padding: 12px 14px;
+  font: inherit;
+  outline: none;
+}
+input[type=password]:focus { border-color: var(--accent); }
+.ok-box {
+  background: rgba(53, 208, 127, .1);
+  border: 1px solid rgba(53, 208, 127, .34);
+  color: #9ae9c2;
+  border-radius: 9px;
+  padding: 10px 12px;
+  font-size: 13px;
+  margin-top: 12px;
+}

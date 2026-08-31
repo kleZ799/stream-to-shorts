@@ -274,7 +274,52 @@ $("chips").innerHTML = EXAMPLES.map((e) => `<span class="chip">${esc(e)}</span>`
   c.onclick = () => {
     const t = $("prompt");
     t.value = t.value.trim() ? `${t.value.trim()}, ${c.textContent}` : c.textContent;
-    refreshPreview();
+    // ---------- first-run setup ----------
+
+async function checkSetup() {
+  try {
+    const d = await (await fetch("/api/settings")).json();
+    if (!d.has_key) $("setup").classList.remove("hidden");
+    if (!d.ffmpeg) {
+      $("srcErr").innerHTML = `<div class="err">ffmpeg isn't on your PATH — clips can't be rendered without it. `
+        + `Install it from ffmpeg.org, then restart this app.</div>`;
+    }
+  } catch (_) { /* offline settings check is not worth blocking startup */ }
+}
+
+$("setProvider").onchange = () => {
+  const gem = $("setProvider").value === "gemini";
+  $("keyLink").textContent = gem ? "Get a free Gemini key →" : "Get an OpenAI key →";
+  $("keyLink").href = gem
+    ? "https://aistudio.google.com/apikey"
+    : "https://platform.openai.com/api-keys";
+};
+
+$("setSave").onclick = async () => {
+  const key = $("setKey").value.trim();
+  if (!key) { $("setMsg").innerHTML = `<div class="err">Paste a key first.</div>`; return; }
+  $("setSave").disabled = true;
+  $("setSave").textContent = "Saving…";
+  try {
+    const r = await fetch("/api/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ provider: $("setProvider").value, api_key: key }),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || "Could not save");
+    $("setMsg").innerHTML = `<div class="ok-box">Saved. You're ready to go.</div>`;
+    setTimeout(() => $("setup").classList.add("hidden"), 1200);
+  } catch (e) {
+    $("setMsg").innerHTML = `<div class="err">${esc(e.message)}</div>`;
+  } finally {
+    $("setSave").disabled = false;
+    $("setSave").textContent = "Save and continue";
+  }
+};
+
+checkSetup();
+refreshPreview();
   };
 });
 
@@ -300,4 +345,49 @@ $("url").addEventListener("keydown", (e) => { if (e.key === "Enter") loadUrl(); 
 $("srcClear").onclick = clearSource;
 $("go").onclick = run;
 
+// ---------- first-run setup ----------
+
+async function checkSetup() {
+  try {
+    const d = await (await fetch("/api/settings")).json();
+    if (!d.has_key) $("setup").classList.remove("hidden");
+    if (!d.ffmpeg) {
+      $("srcErr").innerHTML = `<div class="err">ffmpeg isn't on your PATH — clips can't be rendered without it. `
+        + `Install it from ffmpeg.org, then restart this app.</div>`;
+    }
+  } catch (_) { /* offline settings check is not worth blocking startup */ }
+}
+
+$("setProvider").onchange = () => {
+  const gem = $("setProvider").value === "gemini";
+  $("keyLink").textContent = gem ? "Get a free Gemini key →" : "Get an OpenAI key →";
+  $("keyLink").href = gem
+    ? "https://aistudio.google.com/apikey"
+    : "https://platform.openai.com/api-keys";
+};
+
+$("setSave").onclick = async () => {
+  const key = $("setKey").value.trim();
+  if (!key) { $("setMsg").innerHTML = `<div class="err">Paste a key first.</div>`; return; }
+  $("setSave").disabled = true;
+  $("setSave").textContent = "Saving…";
+  try {
+    const r = await fetch("/api/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ provider: $("setProvider").value, api_key: key }),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || "Could not save");
+    $("setMsg").innerHTML = `<div class="ok-box">Saved. You're ready to go.</div>`;
+    setTimeout(() => $("setup").classList.add("hidden"), 1200);
+  } catch (e) {
+    $("setMsg").innerHTML = `<div class="err">${esc(e.message)}</div>`;
+  } finally {
+    $("setSave").disabled = false;
+    $("setSave").textContent = "Save and continue";
+  }
+};
+
+checkSetup();
 refreshPreview();
