@@ -3,9 +3,8 @@ import re
 import time
 
 from ..config import (
-    GEMINI_MODEL,
-    LLM_PROVIDER,
-    OPENAI_MODEL,
+    current_model,
+    current_provider,
     require_gemini_key,
     require_openai_key,
 )
@@ -23,7 +22,7 @@ def call_openai_llm(prompt: str) -> str:
 
     client = OpenAI(api_key=require_openai_key())
     response = client.chat.completions.create(
-        model=OPENAI_MODEL,
+        model=current_model("openai"),
         temperature=0.7,
         messages=[{"role": "user", "content": prompt}],
     )
@@ -60,7 +59,7 @@ def call_gemini_llm(prompt: str) -> str:
     for attempt in range(attempts):
         try:
             response = client.models.generate_content(
-                model=GEMINI_MODEL, contents=prompt, config=config
+                model=current_model("gemini"), contents=prompt, config=config
             )
             break
         except Exception as e:
@@ -105,7 +104,7 @@ def call_gemini_llm(prompt: str) -> str:
 
 def call_local_llm(prompt: str) -> str:
     """Dispatch to the configured local LLM provider."""
-    provider = (LLM_PROVIDER or "openai").strip().lower()
+    provider = current_provider()
     if provider == "openai":
         return call_openai_llm(prompt)
     if provider == "gemini":

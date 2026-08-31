@@ -53,7 +53,24 @@ def require_api_key() -> str:
     return MUAPI_API_KEY
 
 
+def current_provider() -> str:
+    """LLM provider, re-read at call time so UI changes take effect live."""
+    from . import user_config
+    return (user_config.get("LLM_PROVIDER", LLM_PROVIDER) or "gemini").strip().lower()
+
+
+def current_model(provider: str) -> str:
+    from . import user_config
+    if provider == "openai":
+        return user_config.get("OPENAI_MODEL", OPENAI_MODEL)
+    return user_config.get("GEMINI_MODEL", GEMINI_MODEL)
+
+
 def require_openai_key() -> str:
+    from . import user_config
+    key = user_config.get("OPENAI_API_KEY", OPENAI_API_KEY)
+    if key:
+        return key
     if not OPENAI_API_KEY:
         raise RuntimeError(
             "OPENAI_API_KEY is not set. Local mode needs an OpenAI key for highlight ranking. "
@@ -63,6 +80,10 @@ def require_openai_key() -> str:
 
 
 def require_gemini_key() -> str:
+    from . import user_config
+    key = user_config.get("GEMINI_API_KEY", GEMINI_API_KEY)
+    if key:
+        return key
     if not GEMINI_API_KEY:
         raise RuntimeError(
             "GEMINI_API_KEY is not set. Local mode needs a Gemini key when LLM_PROVIDER=gemini. "
