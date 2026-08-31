@@ -49,10 +49,15 @@ def call_gemini_llm(prompt: str) -> str:
         "max_output_tokens": 32768,
     }
 
-    # The free tier rate-limits aggressively and tells us how long to wait;
-    # honour that instead of failing the whole pipeline mid-run.
+    # By the time we get here the run has already paid for a download and a
+    # transcription, so a blip must not sink it. Gemini fails transiently in
+    # several ways — free-tier rate limits, capacity spikes, and plain network
+    # timeouts — and none of them read the same in the error string. So the
+    # rule is inverted: give up immediately only on errors that retrying can
+    # never fix (bad key, bad request), and retry everything else.
+    attempts = 5
     last_error = None
-    for attempt in range(4):
+    for attempt in range(attempts):
         try:
             response = client.models.generate_content(
                 model=GEMINI_MODEL, contents=prompt, config=config
@@ -60,13 +65,27 @@ def call_gemini_llm(prompt: str) -> str:
             break
         except Exception as e:
             last_error = e
-            if "RESOURCE_EXHAUSTED" not in str(e) and "429" not in str(e):
+            msg = str(e)
+
+            permanent = any(t in msg for t in (
+                "API_KEY_INVALID", "API key not valid", "PERMISSION_DENIED",
+                "UNAUTHENTICATED", "401", "403",
+                "INVALID_ARGUMENT", "NOT_FOUND", "404",
+            ))
+            if permanent or attempt == attempts - 1:
                 raise
-            m = re.search(r"retry in ([0-9.]+)s", str(e))
-            delay = float(m.group(1)) + 1 if m else 30.0 * (attempt + 1)
-            if attempt == 3:
-                raise
-            print(f"[llm] rate limited; waiting {delay:.0f}s", flush=True)
+
+            m = re.search(r"retry in ([0-9.]+)s", msg)
+            if m:
+                # The rate limiter told us exactly how long to wait.
+                delay, reason = float(m.group(1)) + 1, "rate limited"
+            else:
+                delay = min(60.0, 5.0 * (2 ** attempt))
+                reason = "transient error"
+
+            short = msg.splitlines()[0][:120]
+            print(f"[llm] {reason}; retrying in {delay:.0f}s "
+                  f"(attempt {attempt + 1}/{attempts}) — {short}", flush=True)
             time.sleep(delay)
     else:
         raise last_error

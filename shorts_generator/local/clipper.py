@@ -58,7 +58,8 @@ def _cut_subclip(source_path: str, start: float, end: float, out_path: str) -> s
     return out_path
 
 
-def _reframe_vertical(in_path: str, out_path: str, aspect_ratio: str) -> str:
+def _reframe_vertical(in_path: str, out_path: str, aspect_ratio: str,
+                      target_resolution: Optional[str] = None) -> str:
     """Crop the cut clip to the target aspect ratio, tracking faces if possible."""
     try:
         import cv2  # type: ignore
@@ -144,9 +145,10 @@ def _reframe_vertical(in_path: str, out_path: str, aspect_ratio: str) -> str:
         writer.release()
 
     # Mux audio from the cut clip back onto the silent reframed video.
+    resolution = target_resolution if target_resolution is not None else LOCAL_OUTPUT_RESOLUTION
     scale_args: List[str] = []
-    if LOCAL_OUTPUT_RESOLUTION:
-        w, h = LOCAL_OUTPUT_RESOLUTION.split("x")
+    if resolution:
+        w, h = resolution.split("x")
         # lanczos preserves detail on the upscale from the native crop size
         scale_args = ["-vf", f"scale={int(w)}:{int(h)}:flags=lanczos"]
 
@@ -174,12 +176,13 @@ def crop_clip_local(
     end_time: float,
     aspect_ratio: str,
     out_path: str,
+    target_resolution: Optional[str] = None,
 ) -> str:
     """Cut + reframe one highlight, returning the local mp4 path."""
     cut_path = out_path + ".cut.mp4"
     try:
         _cut_subclip(source_path, start_time, end_time, cut_path)
-        _reframe_vertical(cut_path, out_path, aspect_ratio)
+        _reframe_vertical(cut_path, out_path, aspect_ratio, target_resolution=target_resolution)
     finally:
         _safe_remove(cut_path)
     return out_path
@@ -190,12 +193,14 @@ def crop_highlights_local(
     highlights: List[Dict],
     aspect_ratio: str = "9:16",
     out_dir: Optional[str] = None,
+    target_resolution: Optional[str] = None,
+    name_prefix: str = "short",
 ) -> List[Dict]:
     out_dir = out_dir or LOCAL_OUTPUT_DIR
     os.makedirs(out_dir, exist_ok=True)
     results: List[Dict] = []
     for i, h in enumerate(highlights, 1):
-        out_path = os.path.join(out_dir, f"short_{i:02d}.mp4")
+        out_path = os.path.join(out_dir, f"{name_prefix}_{i:02d}.mp4")
         print(f"[clip/local] {i}/{len(highlights)}: {h.get('title', '(untitled)')}", flush=True)
         try:
             crop_clip_local(
@@ -204,6 +209,7 @@ def crop_highlights_local(
                 float(h["end_time"]),
                 aspect_ratio,
                 out_path,
+                target_resolution=target_resolution,
             )
             results.append({**h, "clip_url": out_path})
         except Exception as e:

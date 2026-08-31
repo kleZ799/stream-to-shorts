@@ -7,7 +7,7 @@ import os
 import re
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
-from typing import Optional
+from typing import Dict, List, Optional
 
 from ..config import LOCAL_OUTPUT_DIR
 
@@ -90,6 +90,76 @@ def _existing_download(out_dir: str, video_id: str) -> Optional[str]:
         if os.path.exists(candidate):
             return candidate
     return None
+
+
+def is_channel_or_playlist(url: str) -> bool:
+    """True if the URL points at a collection rather than a single video."""
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        return False
+    host = (parsed.netloc or "").lower().replace("www.", "")
+    if "youtube.com" not in host and host != "youtu.be":
+        return False
+    if _extract_youtube_video_id(url):
+        return False
+    path = parsed.path.rstrip("/")
+    if "list=" in (parsed.query or ""):
+        return True
+    return (
+        path.startswith("/@")
+        or path.startswith("/channel/")
+        or path.startswith("/c/")
+        or path.startswith("/user/")
+        or path.startswith("/playlist")
+        or path.endswith(("/videos", "/streams", "/shorts"))
+    )
+
+
+def list_channel_videos(url: str, limit: int = 12) -> List[Dict]:
+    """List recent videos on a channel or playlist without downloading them.
+
+    Uses yt-dlp's flat extraction, so this is a metadata call — it does not
+    pull any media. Returns newest-first.
+    """
+    yt_dlp = _import_ytdlp()
+
+    # Channel roots don't list videos directly; /videos and /streams do.
+    parsed = urlparse(url)
+    probe_url = url
+    path = parsed.path.rstrip("/")
+    if (path.startswith("/@") or path.startswith("/channel/")
+            or path.startswith("/c/") or path.startswith("/user/")):
+        if not path.endswith(("/videos", "/streams", "/shorts")):
+            probe_url = f"{url.rstrip('/')}/videos"
+
+    ydl_opts = {
+        "quiet": True,
+        "no_warnings": True,
+        "extract_flat": "in_playlist",
+        "skip_download": True,
+        "playlistend": limit,
+    }
+
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(probe_url, download=False)
+
+    entries = info.get("entries") or []
+    videos: List[Dict] = []
+    for e in entries[:limit]:
+        if not e or e.get("_type") == "playlist":
+            continue
+        vid = e.get("id")
+        if not vid:
+            continue
+        videos.append({
+            "id": vid,
+            "title": e.get("title") or "(untitled)",
+            "url": e.get("url") if str(e.get("url", "")).startswith("http")
+                   else f"https://www.youtube.com/watch?v={vid}",
+            "duration": e.get("duration"),
+            "thumbnail": (e.get("thumbnails") or [{}])[-1].get("url"),
+        })
+    return videos
 
 
 def download_youtube_local(video_url: str, fmt: str = "720", out_dir: Optional[str] = None) -> str:

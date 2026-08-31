@@ -89,7 +89,8 @@ def _detect_face(source_path: str, timestamp: float, src_w: int, src_h: int,
 
 
 def locate_webcam(source_path: str, start: float, end: float,
-                  corner: str = "bottom-left") -> Optional[Dict[str, int]]:
+                  corner: str = "bottom-left",
+                  face_context_multiple: float = FACE_CONTEXT_MULTIPLE) -> Optional[Dict[str, int]]:
     """Sample frames across [start, end] and derive a stable webcam crop rect.
 
     Medians rather than means, so one bad detection (a character's face, a
@@ -111,7 +112,7 @@ def locate_webcam(source_path: str, start: float, end: float,
     cy = int(statistics.median(h[1] for h in hits))
     face_w = int(statistics.median(h[2] for h in hits))
 
-    crop_w = int(face_w * FACE_CONTEXT_MULTIPLE * (1 - CAM_EDGE_INSET))
+    crop_w = int(face_w * face_context_multiple * (1 - CAM_EDGE_INSET))
     crop_h = int(crop_w * 3 / 4)
 
     x = cx - crop_w // 2
@@ -138,12 +139,15 @@ def render_stacked_clip(
     out_w: int = 1080,
     out_h: int = 1920,
     corner: str = "bottom-left",
+    cam_panel_fraction: float = CAM_PANEL_FRACTION,
+    face_context_multiple: float = FACE_CONTEXT_MULTIPLE,
 ) -> Dict:
     """Cut [start, end] and render it as webcam-over-gameplay in one ffmpeg pass."""
     src_w, src_h = _probe_dimensions(source_path)
-    cam = locate_webcam(source_path, start, end, corner=corner)
+    cam = locate_webcam(source_path, start, end, corner=corner,
+                        face_context_multiple=face_context_multiple)
 
-    cam_h = int(out_h * CAM_PANEL_FRACTION)
+    cam_h = int(out_h * cam_panel_fraction)
     cam_h -= cam_h % 2
     game_h = out_h - cam_h
 
@@ -193,17 +197,24 @@ def render_stacked_highlights(
     highlights: List[Dict],
     out_dir: Optional[str] = None,
     corner: str = "bottom-left",
+    out_w: int = 1080,
+    out_h: int = 1920,
+    cam_panel_fraction: float = CAM_PANEL_FRACTION,
+    face_context_multiple: float = FACE_CONTEXT_MULTIPLE,
+    name_prefix: str = "short",
 ) -> List[Dict]:
     out_dir = out_dir or LOCAL_OUTPUT_DIR
     os.makedirs(out_dir, exist_ok=True)
     results: List[Dict] = []
     for i, h in enumerate(highlights, 1):
-        out_path = os.path.join(out_dir, f"short_{i:02d}.mp4")
+        out_path = os.path.join(out_dir, f"{name_prefix}_{i:02d}.mp4")
         print(f"[stack] {i}/{len(highlights)}: {h.get('title', '(untitled)')}", flush=True)
         try:
             info = render_stacked_clip(
                 source_path, float(h["start_time"]), float(h["end_time"]), out_path,
-                corner=corner,
+                corner=corner, out_w=out_w, out_h=out_h,
+                cam_panel_fraction=cam_panel_fraction,
+                face_context_multiple=face_context_multiple,
             )
             cam = info["cam"]
             print(
