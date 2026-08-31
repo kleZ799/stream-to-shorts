@@ -137,6 +137,32 @@ class JobStore:
             jobs = sorted(self._jobs.values(), key=lambda j: j.created_at, reverse=True)
         return [j.snapshot() for j in jobs]
 
+    def clip(self, job: Job, filename: str) -> Optional[Dict]:
+        with self._lock:
+            for c in job.clips:
+                if c.get("file") == filename:
+                    return dict(c)
+        return None
+
+    def replace_clip(self, job: Job, filename: str, updates: Dict) -> Optional[Dict]:
+        """Swap in an edited clip's details, keeping its place in the list."""
+        with self._lock:
+            for c in job.clips:
+                if c.get("file") == filename:
+                    c.update(updates)
+                    job._version += 1
+                    return dict(c)
+        return None
+
+    def remove_clip(self, job: Job, filename: str) -> bool:
+        with self._lock:
+            keep = [c for c in job.clips if c.get("file") != filename]
+            if len(keep) == len(job.clips):
+                return False
+            job.clips = keep
+            job._version += 1
+            return True
+
     # --- internals --------------------------------------------------------
 
     def _update(self, job: Job, *, stage: Optional[str] = None,
