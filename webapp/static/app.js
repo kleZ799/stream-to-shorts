@@ -240,6 +240,57 @@ function finish(s) {
       </div>
       <a class="dl" href="${esc(c.url)}" download>Download</a>
     </div>`).join("");
+
+  renderFiles(s);
+}
+
+// Says plainly which file is the full video and which folder holds the clips —
+// the two things people go hunting for after a run.
+function renderFiles(s) {
+  const rows = [];
+  if (s.shorts_dir) {
+    rows.push(fileRow("SHORTS", "Your shorts",
+      `${(s.clips || []).filter((c) => c.url).length} clip(s) ready to upload`,
+      s.shorts_dir));
+  }
+  if (s.source_path) {
+    rows.push(fileRow("SOURCE", "The full source video",
+      "The original you started from - not the thing you upload",
+      s.source_path));
+  }
+  $("filesPanel").innerHTML = rows.length
+    ? `<div class="files">${rows.join("")}</div>` : "";
+
+  [...document.querySelectorAll("[data-reveal]")].forEach((b) => {
+    b.onclick = async () => {
+      b.disabled = true;
+      try {
+        const r = await fetch("/api/reveal", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ path: b.dataset.reveal }),
+        });
+        if (!r.ok) throw new Error((await r.json()).detail || "Could not open");
+      } catch (e) {
+        b.textContent = "Can't open";
+        setTimeout(() => { b.textContent = "Open folder"; }, 1800);
+      } finally {
+        b.disabled = false;
+      }
+    };
+  });
+}
+
+function fileRow(tag, label, sub, path) {
+  return `<div class="file-row">
+    <span class="ico">${esc(tag)}</span>
+    <span class="txt">
+      <div class="lbl">${esc(label)}</div>
+      <div class="sub">${esc(sub)}</div>
+      <div class="pth">${esc(path)}</div>
+    </span>
+    <button class="ghost" data-reveal="${esc(path)}">Open folder</button>
+  </div>`;
 }
 
 // ---------- helpers ----------
@@ -318,7 +369,53 @@ $("setSave").onclick = async () => {
   }
 };
 
+$("uploadBtn").onclick = async () => {
+  const b = $("uploadBtn");
+  const original = b.textContent;
+  b.textContent = "Opening YouTube...";
+  try {
+    await fetch("/api/open-upload", { method: "POST" });
+  } catch (_) {
+    window.open("https://www.youtube.com/upload", "_blank");
+  }
+  setTimeout(() => { b.textContent = original; }, 1500);
+};
+
+// ---------- save location ----------
+
+async function loadLocations() {
+  try {
+    const d = await (await fetch("/api/locations")).json();
+    $("locPath").value = d.root;
+  } catch (_) { /* leave it blank rather than blocking startup */ }
+}
+
+$("locSave").onclick = async () => {
+  const path = $("locPath").value.trim();
+  if (!path) return;
+  $("locSave").disabled = true;
+  $("locSave").textContent = "...";
+  try {
+    const r = await fetch("/api/locations", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path }),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || "Could not change the folder");
+    $("locPath").value = d.root;
+    $("locMsg").innerHTML = `<div class="ok-box">Saved. New videos go to <b>${esc(d.root)}</b>.</div>`;
+    setTimeout(() => { $("locMsg").innerHTML = ""; }, 5000);
+  } catch (e) {
+    $("locMsg").innerHTML = `<div class="err">${esc(e.message)}</div>`;
+  } finally {
+    $("locSave").disabled = false;
+    $("locSave").textContent = "Change";
+  }
+};
+
 checkSetup();
+loadLocations();
 refreshPreview();
   };
 });
@@ -389,5 +486,51 @@ $("setSave").onclick = async () => {
   }
 };
 
+$("uploadBtn").onclick = async () => {
+  const b = $("uploadBtn");
+  const original = b.textContent;
+  b.textContent = "Opening YouTube...";
+  try {
+    await fetch("/api/open-upload", { method: "POST" });
+  } catch (_) {
+    window.open("https://www.youtube.com/upload", "_blank");
+  }
+  setTimeout(() => { b.textContent = original; }, 1500);
+};
+
+// ---------- save location ----------
+
+async function loadLocations() {
+  try {
+    const d = await (await fetch("/api/locations")).json();
+    $("locPath").value = d.root;
+  } catch (_) { /* leave it blank rather than blocking startup */ }
+}
+
+$("locSave").onclick = async () => {
+  const path = $("locPath").value.trim();
+  if (!path) return;
+  $("locSave").disabled = true;
+  $("locSave").textContent = "...";
+  try {
+    const r = await fetch("/api/locations", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path }),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || "Could not change the folder");
+    $("locPath").value = d.root;
+    $("locMsg").innerHTML = `<div class="ok-box">Saved. New videos go to <b>${esc(d.root)}</b>.</div>`;
+    setTimeout(() => { $("locMsg").innerHTML = ""; }, 5000);
+  } catch (e) {
+    $("locMsg").innerHTML = `<div class="err">${esc(e.message)}</div>`;
+  } finally {
+    $("locSave").disabled = false;
+    $("locSave").textContent = "Change";
+  }
+};
+
 checkSetup();
+loadLocations();
 refreshPreview();

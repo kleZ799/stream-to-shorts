@@ -7,10 +7,12 @@ Run it with:
     python -m webapp
 """
 import asyncio
+import contextlib
 import json
 import os
 import re
 import shutil
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -202,6 +204,20 @@ async def reveal(req: RevealRequest) -> dict:
     return {"opened": str(target)}
 
 
+@app.post("/api/open-upload")
+async def open_upload() -> dict:
+    """Open YouTube's upload page in the user's real browser.
+
+    The URL is hardcoded on purpose — this opens an external page, so it must
+    not be steerable by anything the page sends.
+    """
+    import webbrowser
+
+    url = "https://www.youtube.com/upload"
+    ok = await asyncio.to_thread(webbrowser.open, url)
+    return {"opened": ok, "url": url}
+
+
 @app.post("/api/layout/preview")
 async def layout_preview(req: LayoutPreviewRequest) -> dict:
     """Parse a layout prompt without running anything, so the UI can show
@@ -325,6 +341,179 @@ async def get_clip(job_id: str, filename: str) -> FileResponse:
         raise HTTPException(404, "No such clip")
 
     return FileResponse(path, media_type="video/mp4", filename=safe)
+
+
+# --- clip editing ---------------------------------------------------------
+#
+# Everything below works on clips a finished job already produced, so the user
+# can fix a cut without re-running the whole pipeline.
+
+MAX_CLIP_SECONDS = 300
+
+
+class TrimRequest(BaseModel):
+    start: float
+    end: float
+    mute: bool = False
+
+
+class SaveClipRequest(BaseModel):
+    name: Optional[str] = None
+
+
+def _job_or_404(job_id: str):
+    job = STORE.get(job_id)
+    if not job:
+        raise HTTPException(404, "No such job")
+    return job
+
+
+def _clip_path(job, filename: str) -> Path:
+    """Resolve a clip filename inside its job directory, and nowhere else."""
+    safe = os.path.basename(filename)
+    root = Path(job.out_dir).resolve()
+    path = (root / safe).resolve()
+    try:
+        path.relative_to(root)
+    except ValueError:
+        raise HTTPException(403, "That file is outside the job folder.")
+    return path
+
+
+def _strip_audio(path: Path) -> None:
+    """Rewrite a clip without its audio track, in place."""
+    import subprocess
+
+    tmp = path.with_name(path.stem + "_muted" + path.suffix)
+    subprocess.run(
+        ["ffmpeg", "-y", "-loglevel", "error", "-i", str(path),
+         "-c", "copy", "-an", "-movflags", "+faststart", str(tmp)],
+        check=True,
+    )
+    os.replace(tmp, path)
+
+
+@app.post("/api/jobs/{job_id}/clips/{filename}/trim")
+async def trim_clip(job_id: str, filename: str, req: TrimRequest) -> dict:
+    """Re-cut one clip at new timestamps, straight from the downloaded source.
+
+    Re-rendering (rather than trimming the rendered file) means the span can
+    grow as well as shrink, and the layout stays exactly what the user asked
+    for the first time round.
+    """
+    from shorts_generator.render import render_highlights
+
+    job = _job_or_404(job_id)
+    clip = STORE.clip(job, os.path.basename(filename))
+    if clip is None:
+        raise HTTPException(404, "No such clip")
+    if not job.source_path or not os.path.exists(job.source_path):
+        raise HTTPException(409, "The source video for this job is gone — re-run it to edit.")
+
+    start, end = float(req.start), float(req.end)
+    if start < 0:
+        raise HTTPException(400, "Start can't be before the beginning of the video.")
+    if end - start < 1.0:
+        raise HTTPException(400, "A clip needs to be at least a second long.")
+    if end - start > MAX_CLIP_SECONDS:
+        raise HTTPException(400, f"Keep clips under {MAX_CLIP_SECONDS // 60} minutes.")
+
+    old_path = _clip_path(job, clip["file"])
+    highlight = {
+        "title": clip.get("title") or "Clip",
+        "start_time": start,
+        "end_time": end,
+        "score": clip.get("score"),
+        "hook_sentence": clip.get("hook_sentence") or "",
+        "virality_reason": clip.get("virality_reason") or "",
+    }
+    prefix = f"edit_{clip.get('index', 1):02d}_{int(time.time())}"
+
+    def _render():
+        out = render_highlights(job.source_path, [highlight], job.spec,
+                                out_dir=job.out_dir, name_prefix=prefix)
+        return out[0] if out else {}
+
+    try:
+        result = await asyncio.to_thread(_render)
+    except Exception as e:
+        raise HTTPException(500, f"Could not re-cut that clip: {e}")
+
+    new_path = result.get("clip_url")
+    if not new_path or not os.path.exists(new_path):
+        raise HTTPException(500, result.get("error") or "The re-cut produced no file.")
+
+    if req.mute:
+        try:
+            await asyncio.to_thread(_strip_audio, Path(new_path))
+        except Exception as e:
+            raise HTTPException(500, f"Could not mute that clip: {e}")
+
+    new_name = os.path.basename(new_path)
+    updated = STORE.replace_clip(job, clip["file"], {
+        "file": new_name,
+        "url": f"/api/jobs/{job.id}/clips/{new_name}",
+        "start_time": start,
+        "end_time": end,
+        "duration": round(end - start, 1),
+        "muted": bool(req.mute),
+        "edited": True,
+    })
+
+    # The old render is dead weight once the new one is in the list.
+    if old_path.name != new_name:
+        with contextlib.suppress(OSError):
+            old_path.unlink()
+
+    return updated or {}
+
+
+@app.delete("/api/jobs/{job_id}/clips/{filename}")
+async def delete_clip(job_id: str, filename: str) -> dict:
+    """Throw a clip away — file and all."""
+    job = _job_or_404(job_id)
+    safe = os.path.basename(filename)
+    if STORE.clip(job, safe) is None:
+        raise HTTPException(404, "No such clip")
+
+    path = _clip_path(job, safe)
+    with contextlib.suppress(OSError):
+        path.unlink()
+    STORE.remove_clip(job, safe)
+    return {"deleted": safe, "remaining": len(job.clips)}
+
+
+@app.post("/api/jobs/{job_id}/clips/{filename}/save")
+async def save_clip(job_id: str, filename: str, req: SaveClipRequest) -> dict:
+    """Copy a clip out of the job folder into the user's save location.
+
+    Job folders are working space; this is how a clip the user actually wants
+    ends up somewhere they'll find it later.
+    """
+    from shorts_generator import user_config
+
+    job = _job_or_404(job_id)
+    safe = os.path.basename(filename)
+    if STORE.clip(job, safe) is None:
+        raise HTTPException(404, "No such clip")
+
+    src = _clip_path(job, safe)
+    if not src.exists():
+        raise HTTPException(404, "That clip's file is missing.")
+
+    stem = re.sub(r"[^A-Za-z0-9 ._-]", "", (req.name or Path(safe).stem)).strip() or "short"
+    dest_dir = user_config.shorts_dir()
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest = dest_dir / f"{stem}.mp4"
+    n = 1
+    while dest.exists():
+        dest = dest_dir / f"{stem}_{n}.mp4"
+        n += 1
+
+    await asyncio.to_thread(shutil.copy2, src, dest)
+    STORE.replace_clip(job, safe, {"saved_to": str(dest)})
+    return {"saved": True, "path": str(dest), "folder": str(dest_dir)}
+
 
 
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")

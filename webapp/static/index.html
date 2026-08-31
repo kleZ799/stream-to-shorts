@@ -83,6 +83,16 @@
         </label>
         <button class="go" id="go" disabled>Add a source first</button>
       </div>
+
+      <div class="card">
+        <h2>Where files are saved</h2>
+        <div class="row">
+          <input type="text" id="locPath" placeholder="Choose a folder">
+          <button class="ghost" id="locSave" style="flex:0 0 auto">Change</button>
+        </div>
+        <p class="loc-hint">New videos go here. Files already saved stay where they are.</p>
+        <div id="locMsg"></div>
+      </div>
     </div>
 
     <!-- ============ RIGHT: live preview ============ -->
@@ -118,7 +128,10 @@
   <!-- ============ results ============ -->
   <div class="card hidden" id="results" style="margin-top:18px">
     <h2>Your clips</h2>
+    <button class="go upload" id="uploadBtn">Upload to YouTube</button>
+    <p class="upload-hint">Opens YouTube&rsquo;s upload page. Pick your clips from the folder below.</p>
     <div class="clips" id="clips"></div>
+    <div id="filesPanel"></div>
   </div>
 
 </div>
