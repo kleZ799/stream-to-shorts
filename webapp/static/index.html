@@ -56,11 +56,11 @@
       <div class="card">
         <h2>3 · Go</h2>
         <label class="fld">
-          <span>Source download quality — higher is sharper but slower</span>
+          <span>Source quality — clips are rendered at the best size this supports</span>
           <select id="format">
+            <option value="best" selected>Best available — match the source</option>
+            <option value="1080">1080p</option>
             <option value="720">720p — fastest</option>
-            <option value="1080" selected>1080p — recommended</option>
-            <option value="1440">1440p — sharpest</option>
           </select>
         </label>
         <button class="go" id="go" disabled>Add a source first</button>

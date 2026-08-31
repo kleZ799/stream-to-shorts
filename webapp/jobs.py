@@ -65,7 +65,7 @@ class Job:
     id: str
     source: str
     spec: LayoutSpec
-    download_format: str = "720"
+    download_format: str = "best"
     language: Optional[str] = None
     status: str = "queued"          # queued | running | done | error
     stage: str = "queued"
@@ -111,7 +111,7 @@ class JobStore:
 
     # --- public API -------------------------------------------------------
 
-    def create(self, source: str, spec: LayoutSpec, download_format: str = "720",
+    def create(self, source: str, spec: LayoutSpec, download_format: str = "best",
                language: Optional[str] = None) -> Job:
         job = Job(id=uuid.uuid4().hex[:12], source=source, spec=spec,
                   download_format=download_format, language=language)

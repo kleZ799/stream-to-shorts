@@ -46,7 +46,7 @@ class JobRequest(BaseModel):
     source: str
     prompt: str = ""
     num_clips: Optional[int] = None
-    download_format: str = "720"
+    download_format: str = "best"
     language: Optional[str] = None
     use_llm: bool = True
 
