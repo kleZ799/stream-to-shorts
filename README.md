@@ -117,8 +117,8 @@ Cut and stack in one ffmpeg pass, straight to 1080×1920 h264 with `+faststart`.
 **Prerequisites:** Python 3.10+, `ffmpeg` on your PATH, and a [free Gemini API key](https://aistudio.google.com/apikey).
 
 ```bash
-git clone https://github.com/kleZ799/AI-Youtube-Shorts-Generator.git
-cd AI-Youtube-Shorts-Generator
+git clone https://github.com/kleZ799/stream-to-shorts.git
+cd stream-to-shorts
 python -m venv venv
 venv\Scripts\activate
 pip install -r requirements-local.txt
