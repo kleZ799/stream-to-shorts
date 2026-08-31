@@ -154,18 +154,35 @@ Clips land in `output/` as `short_01.mp4` … `short_05.mp4`, alongside a `resul
 
 ---
 
-## The web UI
+## The app
 
-There's a browser front end for everything above — no flags, no editing constants.
+There's a desktop app for everything above — no flags, no editing constants, no Python.
+
+**Just want to use it?** Grab the latest build from [Releases](https://github.com/kleZ799/stream-to-shorts/releases), unzip, and run `StreamToShorts.exe`. It opens as a normal app window. On first launch it asks for one free API key and remembers it — nothing else to configure.
+
+You'll also need [ffmpeg](https://ffmpeg.org/download.html) on your PATH. The app checks at startup and tells you if it's missing.
+
+**Running from source:**
 
 ```bash
 pip install -r requirements-web.txt
-python -m webapp
+python desktop.py
 ```
 
-Then open **http://127.0.0.1:8000**.
+Prefer it in a browser instead? `python -m webapp` serves it at http://127.0.0.1:8000.
 
-**Drop a file or paste a link.** Drag a VOD straight onto the page, or paste a YouTube URL. Paste a *channel* link and it lists the 12 most recent videos as a grid to pick from.
+**Building the executable yourself:**
+
+```bash
+pip install -r requirements-web.txt pyinstaller
+python build_exe.py --clean
+```
+
+Output lands in `dist/StreamToShorts/` at roughly 390 MB — zip that folder for a release. Drop `ffmpeg.exe` and `ffprobe.exe` into a `./bin` folder before building and they get bundled too, so users need nothing at all.
+
+**Drop a file or paste a link.** Drag a VOD straight in, or paste a YouTube URL. Paste a *channel* link and it lists the 12 most recent videos as a grid to pick from.
+
+**Clips come out at the source's real quality.** The renderer measures the crop it's actually going to take and picks the highest standard size that crop genuinely supports — a stacked 1440p stream renders at 1440×2560 rather than being flattened to 1080p. It won't upscale past what the footage holds, because inventing pixels only grows the file.
 
 **Describe the layout in plain English.** A live preview redraws as you type — the real frame shape, the real webcam panel height — so you can see your words land before spending a single second of render time:
 
@@ -189,9 +206,11 @@ Give it a timecode and it **skips transcription and ranking entirely** and cuts 
 
 This is the fast path: no Whisper, no LLM, straight to ffmpeg. Seconds instead of minutes, and it costs nothing. Use it when you already know where the moment is — which, after you've watched your own stream, is most of the time.
 
-Jobs run one at a time on a background worker, because Whisper and ffmpeg are both CPU-bound and racing them makes both slower. Progress streams to the browser over SSE with the live pipeline log.
+Jobs run one at a time on a background worker, because Whisper and ffmpeg are both CPU-bound and racing them makes both slower. Progress streams live with the pipeline log.
 
-> The server binds to `127.0.0.1` — your machine only. `--host 0.0.0.0` exposes it to your network, and it prints a warning when you do: there's no authentication, and every job someone starts spends **your** LLM quota and **your** CPU.
+> Everything runs on your machine and binds to localhost only. Your VODs are never uploaded anywhere — the only thing that leaves is the transcript text sent to the ranking model, and even that is skipped entirely when you name an exact span.
+>
+> If you serve it to your network with `python -m webapp --host 0.0.0.0`, note there's no authentication and every job spends **your** API quota and **your** CPU.
 
 ---
 
