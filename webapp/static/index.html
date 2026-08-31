@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Stream to Shorts</title>
+<link rel="stylesheet" href="/static/style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎮</text></svg>">
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>🎮 Stream <span class="grad">→</span> Shorts</h1>
+    <p class="sub">Drop a VOD or paste a link. Describe the layout you want in plain English. Get vertical clips back.</p>
+  </header>
+
+  <div class="grid">
+
+    <!-- ============ LEFT: input ============ -->
+    <div>
+      <div class="card">
+        <h2>1 · Source</h2>
+
+        <div class="drop" id="drop">
+          <div class="big">Drop a video file here</div>
+          <div class="small">mp4, mkv, webm, mov — or click to browse</div>
+          <input type="file" id="file" accept="video/*" class="hidden">
+        </div>
+
+        <div class="or">or</div>
+
+        <div class="row">
+          <input type="text" id="url" placeholder="YouTube video or channel link">
+          <button class="ghost" id="load" style="flex:0 0 auto">Load</button>
+        </div>
+
+        <div id="srcTag" class="src-tag hidden">
+          <span>✓</span><span class="nm" id="srcName"></span><span class="x" id="srcClear">×</span>
+        </div>
+
+        <div id="chanWrap" class="hidden" style="margin-top:16px">
+          <h2>Pick a video</h2>
+          <div class="vids" id="vids"></div>
+        </div>
+
+        <div id="srcErr"></div>
+      </div>
+
+      <div class="card">
+        <h2>2 · Layout — describe it</h2>
+        <textarea id="prompt" placeholder="e.g. put my webcam at the top, vertical for Shorts, 5 clips&#10;&#10;Or name an exact span: cut 14:45 to 15:30"></textarea>
+        <div class="chips" id="chips"></div>
+      </div>
+
+      <div class="card">
+        <h2>3 · Go</h2>
+        <label class="fld">
+          <span>Source download quality — higher is sharper but slower</span>
+          <select id="format">
+            <option value="720">720p — fastest</option>
+            <option value="1080" selected>1080p — recommended</option>
+            <option value="1440">1440p — sharpest</option>
+          </select>
+        </label>
+        <button class="go" id="go" disabled>Add a source first</button>
+      </div>
+    </div>
+
+    <!-- ============ RIGHT: live preview ============ -->
+    <div>
+      <div class="card">
+        <h2>Live preview</h2>
+        <div class="preview-stage">
+          <div class="frame" id="frame">
+            <div class="cam" id="pvCam">webcam</div>
+            <div class="game" id="pvGame">gameplay</div>
+          </div>
+        </div>
+        <div class="dims" id="dims">1080 × 1920</div>
+        <div class="summary" id="summary">9:16 · webcam on top at 42% height · gameplay below</div>
+        <ul class="notes" id="notes"></ul>
+        <div id="exact"></div>
+        <div id="warn"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ progress ============ -->
+  <div class="card" id="progress" style="margin-top:18px">
+    <h2>Working</h2>
+    <div class="stat">
+      <span id="stageLabel">Queued</span>
+      <span class="pct" id="pct">0%</span>
+    </div>
+    <div class="bar"><i id="barFill"></i></div>
+    <div class="log" id="log"></div>
+  </div>
+
+  <!-- ============ results ============ -->
+  <div class="card hidden" id="results" style="margin-top:18px">
+    <h2>Your clips</h2>
+    <div class="clips" id="clips"></div>
+  </div>
+
+</div>
+<script src="/static/app.js"></script>
+</body>
+</html>

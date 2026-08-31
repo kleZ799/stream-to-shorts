@@ -154,6 +154,47 @@ Clips land in `output/` as `short_01.mp4` … `short_05.mp4`, alongside a `resul
 
 ---
 
+## The web UI
+
+There's a browser front end for everything above — no flags, no editing constants.
+
+```bash
+pip install -r requirements-web.txt
+python -m webapp
+```
+
+Then open **http://127.0.0.1:8000**.
+
+**Drop a file or paste a link.** Drag a VOD straight onto the page, or paste a YouTube URL. Paste a *channel* link and it lists the 12 most recent videos as a grid to pick from.
+
+**Describe the layout in plain English.** A live preview redraws as you type — the real frame shape, the real webcam panel height — so you can see your words land before spending a single second of render time:
+
+| Type this | You get |
+|---|---|
+| `webcam at the top` | the stacked layout |
+| `my webcam is bottom right` | which corner to hunt for your overlay |
+| `square, bigger webcam` | 1:1, panel at 55% |
+| `gameplay only, no webcam` | plain centre crop |
+| `follow my face` | face-tracking crop |
+| `3 clips` | how many to make |
+| `cut 14:45 to 15:30` | **exact span, no AI ranking** |
+
+Combine them freely — `cut 14:45 to 15:30, gameplay only, square` does all three.
+
+Parsing is keyword-first and runs in about 70ms, so the preview keeps up with typing and costs no quota. Only genuinely novel phrasing falls through to the LLM.
+
+### Naming an exact span
+
+Give it a timecode and it **skips transcription and ranking entirely** and cuts exactly what you asked for. `14:45 to 15:30`, `1:30-2:45`, `00:14:45 - 00:15:28`, `885s to 928s`, or several at once with `14:45-15:30 and 24:55-25:40`.
+
+This is the fast path: no Whisper, no LLM, straight to ffmpeg. Seconds instead of minutes, and it costs nothing. Use it when you already know where the moment is — which, after you've watched your own stream, is most of the time.
+
+Jobs run one at a time on a background worker, because Whisper and ffmpeg are both CPU-bound and racing them makes both slower. Progress streams to the browser over SSE with the live pipeline log.
+
+> The server binds to `127.0.0.1` — your machine only. `--host 0.0.0.0` exposes it to your network, and it prints a warning when you do: there's no authentication, and every job someone starts spends **your** LLM quota and **your** CPU.
+
+---
+
 ## The workflow I actually use
 
 Ranking and rendering are separate on purpose, because they fail for different reasons and cost different amounts.

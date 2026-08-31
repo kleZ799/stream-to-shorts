@@ -12,3 +12,9 @@ run*.err
 result.json
 highlights*.json
 render_*.py
+
+# web UI runtime artefacts
+webapp_output/
+webapp_uploads/
+*.log
+*.tmp
