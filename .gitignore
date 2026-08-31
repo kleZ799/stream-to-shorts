@@ -18,3 +18,9 @@ webapp_output/
 webapp_uploads/
 *.log
 *.tmp
+
+# build artefacts
+build/
+dist/
+*.spec
+bin/
