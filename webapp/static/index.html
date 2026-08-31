@@ -5,136 +5,368 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Stream to Shorts</title>
 <link rel="stylesheet" href="/static/style.css">
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎮</text></svg>">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='70' y='15' rx='20' fill='%23ff0033'/><path d='M40 35 L68 50 L40 65 Z' fill='%23fff'/></svg>">
 </head>
 <body>
-<div class="wrap">
 
-  <header>
-    <h1>🎮 Stream <span class="grad">→</span> Shorts</h1>
-    <p class="sub">Drop a VOD or paste a link. Describe the layout you want in plain English. Get vertical clips back.</p>
-  </header>
+<!-- icon sprite -->
+<svg class="sprite" aria-hidden="true">
+  <symbol id="i-menu" viewBox="0 0 24 24"><path d="M3 6h18M3 12h18M3 18h18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" fill="none"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5" stroke="currentColor" stroke-width="1.8" fill="none"/><path d="M15.5 15.5 21 21" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+  <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/><path d="M4 16v2.5A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5V16" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" fill="none"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7.5A1.5 1.5 0 0 1 4.5 6h4.2l1.8 2h9A1.5 1.5 0 0 1 21 9.5v8A1.5 1.5 0 0 1 19.5 19h-15A1.5 1.5 0 0 1 3 17.5z" stroke="currentColor" stroke-width="1.7" fill="none" stroke-linejoin="round"/></symbol>
+  <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2" stroke="currentColor" stroke-width="1.7" fill="none"/><path d="M12 2.8l1.3 2.4 2.7-.4 .5 2.7 2.4 1.3-1.5 2.3 1.5 2.3-2.4 1.3-.5 2.7-2.7-.4L12 21.2l-1.3-2.4-2.7.4-.5-2.7-2.4-1.3L6.6 12 5.1 9.7l2.4-1.3.5-2.7 2.7.4z" stroke="currentColor" stroke-width="1.4" fill="none" stroke-linejoin="round"/></symbol>
+  <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 4.5v15l13-7.5z" fill="currentColor"/></symbol>
+  <symbol id="i-pause" viewBox="0 0 24 24"><path d="M7 4.5h3.4v15H7zm6.6 0H17v15h-3.4z" fill="currentColor"/></symbol>
+  <symbol id="i-vol" viewBox="0 0 24 24"><path d="M4 9.5h3.6L12 5.5v13L7.6 14.5H4z" fill="currentColor"/><path d="M15.5 9a4.2 4.2 0 0 1 0 6M18 6.5a7.6 7.6 0 0 1 0 11" stroke="currentColor" stroke-width="1.7" fill="none" stroke-linecap="round"/></symbol>
+  <symbol id="i-mute" viewBox="0 0 24 24"><path d="M4 9.5h3.6L12 5.5v13L7.6 14.5H4z" fill="currentColor"/><path d="M16 9.5l5 5m0-5l-5 5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+  <symbol id="i-scissors" viewBox="0 0 24 24"><circle cx="6" cy="18" r="2.6" stroke="currentColor" stroke-width="1.7" fill="none"/><circle cx="18" cy="18" r="2.6" stroke="currentColor" stroke-width="1.7" fill="none"/><path d="M7.6 16 18.5 4M16.4 16 5.5 4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4v11m0 0 4.5-4.5M12 15l-4.5-4.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/><path d="M4.5 18.5h15" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4.5 6.5h15M9.5 6.5V4.8A1.3 1.3 0 0 1 10.8 3.5h2.4a1.3 1.3 0 0 1 1.3 1.3v1.7M6.5 6.5l.9 12.2A1.4 1.4 0 0 0 8.8 20h6.4a1.4 1.4 0 0 0 1.4-1.3l.9-12.2" stroke="currentColor" stroke-width="1.7" fill="none" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-save" viewBox="0 0 24 24"><path d="M6 4.5h12a1 1 0 0 1 1 1V20l-7-3.6L5 20V5.5a1 1 0 0 1 1-1z" stroke="currentColor" stroke-width="1.7" fill="none" stroke-linejoin="round"/></symbol>
+  <symbol id="i-expand" viewBox="0 0 24 24"><path d="M4 9V4h5M20 15v5h-5M20 9V4h-5M4 15v5h5" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-film" viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="2" stroke="currentColor" stroke-width="1.7" fill="none"/><path d="M8.5 4.5v15M15.5 4.5v15M3.5 12h17" stroke="currentColor" stroke-width="1.4"/></symbol>
+  <symbol id="i-spark" viewBox="0 0 24 24"><path d="M12 3l1.9 5.4L19.5 10l-5.6 1.6L12 17l-1.9-5.4L4.5 10l5.6-1.6z" fill="currentColor"/><path d="M18.5 15l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8z" fill="currentColor" opacity=".7"/></symbol>
+  <symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" stroke="currentColor" stroke-width="1.7" fill="none"/><path d="M9.6 9.4a2.5 2.5 0 1 1 3.3 2.4c-.6.2-.9.7-.9 1.3v.5" stroke="currentColor" stroke-width="1.7" fill="none" stroke-linecap="round"/><circle cx="12" cy="16.4" r="1" fill="currentColor"/></symbol>
+  <symbol id="i-yt" viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="4.2" fill="currentColor"/><path d="M10 9l5.5 3L10 15z" fill="#0f0f0f"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5" stroke="currentColor" stroke-width="2.1" fill="none" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+</svg>
 
-  <div class="card hidden" id="setup" style="margin-bottom:18px">
-    <h2>Setup — one time</h2>
-    <p class="setup-lead">This runs on your machine and needs one free API key to pick the best moments.</p>
+<!-- page-load bar, YouTube style -->
+<div class="loadbar" id="loadbar"><i></i></div>
+
+<!-- ============================ masthead ============================ -->
+<header class="masthead">
+  <div class="mh-left">
+    <button class="ibtn" id="menuBtn" title="Menu"><svg><use href="#i-menu"/></svg></button>
+    <a class="logo" href="#top">
+      <span class="logo-mark"><svg><use href="#i-yt"/></svg></span>
+      <span class="logo-word">Stream to <b>Shorts</b></span>
+      <span class="logo-tag">local</span>
+    </a>
+  </div>
+
+  <div class="mh-center">
+    <div class="searchwrap">
+      <div class="searchbox" id="searchbox">
+        <svg class="search-lead"><use href="#i-search"/></svg>
+        <input type="text" id="url" placeholder="Paste a YouTube video or channel link" autocomplete="off" spellcheck="false">
+        <button class="search-clear hidden" id="urlClear" title="Clear"><svg><use href="#i-close"/></svg></button>
+      </div>
+      <button class="search-go" id="load" title="Load this link"><svg><use href="#i-search"/></svg></button>
+    </div>
+    <button class="ibtn round" id="pickFile" title="Choose a video file"><svg><use href="#i-upload"/></svg></button>
+  </div>
+
+  <div class="mh-right">
+    <button class="pill" id="createBtn"><svg><use href="#i-plus"/></svg><span>Create</span></button>
+    <button class="ibtn" id="folderBtn" title="Open the clips folder"><svg><use href="#i-folder"/></svg></button>
+    <button class="ibtn" id="settingsBtn" title="Settings"><svg><use href="#i-gear"/></svg></button>
+    <div class="avatar" title="Running on this PC">S</div>
+  </div>
+</header>
+
+<!-- ============================ shell ============================ -->
+<div class="shell" id="top">
+
+  <nav class="guide" id="guide">
+    <a class="g-item active" data-go="secCreate"><svg><use href="#i-spark"/></svg><span>Create</span></a>
+    <a class="g-item" data-go="secLayout"><svg><use href="#i-film"/></svg><span>Layout</span></a>
+    <a class="g-item" data-go="results"><svg><use href="#i-play"/></svg><span>Your clips</span><i class="g-count hidden" id="gCount"></i></a>
+    <div class="g-div"></div>
+    <a class="g-item" id="gSettings"><svg><use href="#i-gear"/></svg><span>Settings</span></a>
+    <a class="g-item" id="gFolder"><svg><use href="#i-folder"/></svg><span>Clips folder</span></a>
+    <a class="g-item" id="gUpload"><svg><use href="#i-yt"/></svg><span>Upload to YouTube</span></a>
+    <div class="g-div"></div>
+    <a class="g-item" data-go="secHelp"><svg><use href="#i-help"/></svg><span>How it works</span></a>
+    <p class="g-foot">Everything runs on this PC.<br>Nothing is uploaded anywhere.</p>
+  </nav>
+
+  <main class="content">
+
+    <!-- first-run setup -->
+    <section class="panel accent hidden" id="setup">
+      <div class="p-head"><h2><svg><use href="#i-spark"/></svg>Set up in 30 seconds</h2></div>
+      <p class="lead">Picking the best moments needs one free API key. It is stored on this PC only.</p>
+      <div class="two">
+        <label class="fld">
+          <span>Provider</span>
+          <select id="setProvider">
+            <option value="gemini" selected>Google Gemini &mdash; free tier</option>
+            <option value="openai">OpenAI</option>
+          </select>
+        </label>
+        <label class="fld">
+          <span>API key <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener" id="keyLink">Get a free Gemini key &rarr;</a></span>
+          <input type="password" id="setKey" placeholder="Paste your key here">
+        </label>
+      </div>
+      <button class="btn primary" id="setSave">Save and continue</button>
+      <div id="setMsg"></div>
+    </section>
+
+    <!-- chip bar -->
+    <div class="chipbar-wrap">
+      <div class="chipbar" id="chips"></div>
+    </div>
+
+    <div class="cols">
+      <div class="col-main">
+
+        <!-- 1 · source -->
+        <section class="panel" id="secCreate">
+          <div class="p-head">
+            <h2><span class="step">1</span>Source</h2>
+            <span class="p-hint">A stream VOD, a podcast, anything long</span>
+          </div>
+
+          <div class="drop" id="drop">
+            <div class="drop-ico"><svg><use href="#i-upload"/></svg></div>
+            <div class="big">Drag a video here</div>
+            <div class="small">mp4, mkv, webm, mov. Or click to browse</div>
+            <input type="file" id="file" accept="video/*" class="hidden">
+          </div>
+
+          <div class="or"><span>or paste a link in the search bar above</span></div>
+
+          <div id="srcTag" class="srctag hidden">
+            <span class="tick"><svg><use href="#i-check"/></svg></span>
+            <span class="nm" id="srcName"></span>
+            <button class="ibtn sm" id="srcClear" title="Remove"><svg><use href="#i-close"/></svg></button>
+          </div>
+
+          <div id="chanWrap" class="hidden">
+            <div class="p-head tight"><h2>Pick a video</h2></div>
+            <div class="vids" id="vids"></div>
+          </div>
+
+          <div id="srcErr"></div>
+        </section>
+
+        <!-- 2 · layout -->
+        <section class="panel" id="secLayout">
+          <div class="p-head">
+            <h2><span class="step">2</span>Layout</h2>
+            <span class="p-hint">Plain English, or an exact span</span>
+          </div>
+          <textarea id="prompt" placeholder="e.g. put my webcam at the top, vertical for Shorts, 5 clips&#10;&#10;Or name an exact span: cut 14:45 to 15:30"></textarea>
+        </section>
+
+        <!-- 3 · go -->
+        <section class="panel" id="secGo">
+          <div class="p-head"><h2><span class="step">3</span>Render</h2></div>
+          <label class="fld">
+            <span>Source quality. Clips render at the best size this supports</span>
+            <select id="format">
+              <option value="best" selected>Best available &mdash; match the source</option>
+              <option value="1080">1080p</option>
+              <option value="720">720p &mdash; fastest</option>
+            </select>
+          </label>
+          <button class="btn primary big" id="go" disabled>Add a source first</button>
+        </section>
+      </div>
+
+      <!-- live preview -->
+      <aside class="col-side">
+        <section class="panel sticky">
+          <div class="p-head"><h2>Live preview</h2><span class="dot-live">live</span></div>
+          <div class="stage">
+            <div class="frame" id="frame">
+              <div class="cam" id="pvCam">webcam</div>
+              <div class="game" id="pvGame">gameplay</div>
+              <div class="scanline"></div>
+            </div>
+          </div>
+          <div class="dims" id="dims">1080 &times; 1920</div>
+          <div class="summary" id="summary">9:16 &middot; webcam on top at 42% height &middot; gameplay below</div>
+          <ul class="notes" id="notes"></ul>
+          <div id="exact"></div>
+          <div id="warn"></div>
+        </section>
+      </aside>
+    </div>
+
+    <!-- progress -->
+    <section class="panel hidden" id="progress">
+      <div class="p-head">
+        <h2><span class="spin"></span><span id="stageLabel">Queued</span></h2>
+        <span class="pct" id="pct">0%</span>
+      </div>
+      <div class="bar"><i id="barFill"></i></div>
+      <div class="steps" id="steps"></div>
+      <details class="logwrap">
+        <summary>Show the log</summary>
+        <div class="log" id="log"></div>
+      </details>
+    </section>
+
+    <!-- results -->
+    <section class="panel hidden" id="results">
+      <div class="p-head">
+        <h2><svg><use href="#i-film"/></svg>Your clips</h2>
+        <div class="p-actions">
+          <button class="btn ghost sm" id="folderBtn2"><svg><use href="#i-folder"/></svg>Open folder</button>
+          <button class="btn yt sm" id="uploadBtn"><svg><use href="#i-yt"/></svg>Upload to YouTube</button>
+        </div>
+      </div>
+      <p class="lead">Click a clip to play it, move its in and out points, mute it, save it or throw it away.</p>
+      <div class="clips" id="clips"></div>
+    </section>
+
+    <!-- help -->
+    <section class="panel" id="secHelp">
+      <div class="p-head"><h2><svg><use href="#i-help"/></svg>How it works</h2></div>
+      <ol class="how">
+        <li><b>Give it something long.</b> Drop a file, or paste a YouTube link in the search bar.</li>
+        <li><b>Say what you want.</b> &ldquo;Webcam top, 5 clips&rdquo;. Or an exact span like &ldquo;cut 14:45 to 15:30&rdquo;.</li>
+        <li><b>It watches the whole thing.</b> Transcribes it, ranks the moments, and cuts vertical clips.</li>
+        <li><b>Fix anything.</b> Every clip opens in a player where you can move the in and out points, mute it, save it or delete it.</li>
+      </ol>
+    </section>
+
+  </main>
+</div>
+
+<!-- ============================ settings drawer ============================ -->
+<div class="scrim" id="scrim"></div>
+<aside class="drawer" id="drawer">
+  <div class="d-head">
+    <h2><svg><use href="#i-gear"/></svg>Settings</h2>
+    <button class="ibtn" id="drawerClose"><svg><use href="#i-close"/></svg></button>
+  </div>
+
+  <div class="d-sec">
+    <h3>Where clips are saved</h3>
+    <div class="row">
+      <input type="text" id="locPath" placeholder="Choose a folder" spellcheck="false">
+      <button class="btn ghost" id="locSave">Change</button>
+    </div>
+    <p class="hint">New videos go here. Files already saved stay where they are.</p>
+    <div id="locMsg"></div>
+  </div>
+
+  <div class="d-sec">
+    <h3>Model</h3>
+    <div class="kv" id="setInfo"></div>
     <label class="fld">
       <span>Provider</span>
-      <select id="setProvider">
-        <option value="gemini" selected>Google Gemini — free tier</option>
+      <select id="setProvider2">
+        <option value="gemini">Google Gemini &mdash; free tier</option>
         <option value="openai">OpenAI</option>
       </select>
     </label>
     <label class="fld">
-      <span>API key <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener" id="keyLink">Get a free Gemini key →</a></span>
-      <input type="password" id="setKey" placeholder="Paste your key here">
+      <span>Replace API key</span>
+      <input type="password" id="setKey2" placeholder="Paste a new key">
     </label>
-    <button class="go" id="setSave">Save and continue</button>
-    <div id="setMsg"></div>
+    <button class="btn ghost" id="setSave2">Save key</button>
+    <div id="setMsg2"></div>
   </div>
+</aside>
 
-  <div class="grid">
+<!-- ============================ shorts player ============================ -->
+<div class="player" id="player">
+  <button class="ibtn player-x" id="pClose" title="Close (Esc)"><svg><use href="#i-close"/></svg></button>
 
-    <!-- ============ LEFT: input ============ -->
-    <div>
-      <div class="card">
-        <h2>1 · Source</h2>
-
-        <div class="drop" id="drop">
-          <div class="big">Drop a video file here</div>
-          <div class="small">mp4, mkv, webm, mov — or click to browse</div>
-          <input type="file" id="file" accept="video/*" class="hidden">
+  <div class="player-body">
+    <div class="pv-wrap">
+      <div class="pv-shell">
+        <video id="pVideo" playsinline preload="metadata"></video>
+        <div class="pv-tap" id="pTap"><span class="pv-bigplay"><svg><use href="#i-play"/></svg></span></div>
+        <div class="pv-busy hidden" id="pBusy"><span class="spin lg"></span><span id="pBusyText">Re-cutting&hellip;</span></div>
+        <div class="pv-foot">
+          <div class="pv-title" id="pTitle"></div>
+          <div class="pv-meta" id="pMeta"></div>
+          <div class="scrub" id="pScrub"><i id="pScrubFill"></i><b id="pScrubKnob"></b></div>
+          <div class="pv-time"><span id="pNow">0:00</span><span id="pDur">0:00</span></div>
         </div>
-
-        <div class="or">or</div>
-
-        <div class="row">
-          <input type="text" id="url" placeholder="YouTube video or channel link">
-          <button class="ghost" id="load" style="flex:0 0 auto">Load</button>
-        </div>
-
-        <div id="srcTag" class="src-tag hidden">
-          <span>✓</span><span class="nm" id="srcName"></span><span class="x" id="srcClear">×</span>
-        </div>
-
-        <div id="chanWrap" class="hidden" style="margin-top:16px">
-          <h2>Pick a video</h2>
-          <div class="vids" id="vids"></div>
-        </div>
-
-        <div id="srcErr"></div>
       </div>
 
-      <div class="card">
-        <h2>2 · Layout — describe it</h2>
-        <textarea id="prompt" placeholder="e.g. put my webcam at the top, vertical for Shorts, 5 clips&#10;&#10;Or name an exact span: cut 14:45 to 15:30"></textarea>
-        <div class="chips" id="chips"></div>
-      </div>
-
-      <div class="card">
-        <h2>3 · Go</h2>
-        <label class="fld">
-          <span>Source quality — clips are rendered at the best size this supports</span>
-          <select id="format">
-            <option value="best" selected>Best available — match the source</option>
-            <option value="1080">1080p</option>
-            <option value="720">720p — fastest</option>
-          </select>
-        </label>
-        <button class="go" id="go" disabled>Add a source first</button>
-      </div>
-
-      <div class="card">
-        <h2>Where files are saved</h2>
-        <div class="row">
-          <input type="text" id="locPath" placeholder="Choose a folder">
-          <button class="ghost" id="locSave" style="flex:0 0 auto">Change</button>
-        </div>
-        <p class="loc-hint">New videos go here. Files already saved stay where they are.</p>
-        <div id="locMsg"></div>
+      <div class="rail">
+        <button class="rbtn" id="pPlay" title="Play / pause (Space)"><svg><use href="#i-play"/></svg><span>Play</span></button>
+        <button class="rbtn" id="pMute" title="Mute (M)"><svg><use href="#i-vol"/></svg><span>Sound</span></button>
+        <button class="rbtn" id="pTrimBtn" title="Trim (T)"><svg><use href="#i-scissors"/></svg><span>Trim</span></button>
+        <button class="rbtn" id="pSave" title="Save to your folder"><svg><use href="#i-save"/></svg><span>Save</span></button>
+        <a class="rbtn" id="pDownload" download title="Download"><svg><use href="#i-download"/></svg><span>Download</span></a>
+        <button class="rbtn danger" id="pDelete" title="Delete"><svg><use href="#i-trash"/></svg><span>Delete</span></button>
+        <button class="rbtn" id="pMini" title="Shrink to mini player"><svg><use href="#i-expand"/></svg><span>Mini</span></button>
       </div>
     </div>
 
-    <!-- ============ RIGHT: live preview ============ -->
-    <div>
-      <div class="card">
-        <h2>Live preview</h2>
-        <div class="preview-stage">
-          <div class="frame" id="frame">
-            <div class="cam" id="pvCam">webcam</div>
-            <div class="game" id="pvGame">gameplay</div>
+    <!-- trim panel -->
+    <div class="trim" id="trim">
+      <div class="t-head">
+        <h3><svg><use href="#i-scissors"/></svg>Trim to the exact moment</h3>
+        <button class="ibtn sm" id="trimClose"><svg><use href="#i-close"/></svg></button>
+      </div>
+
+      <div class="t-track" id="tTrack">
+        <div class="t-fill" id="tFill"></div>
+        <div class="t-handle" id="tStartH" data-h="start"></div>
+        <div class="t-handle" id="tEndH" data-h="end"></div>
+      </div>
+      <div class="t-scale"><span id="tScaleA">0:00</span><span id="tScaleB">0:00</span></div>
+
+      <div class="t-fields">
+        <div class="t-fld">
+          <span>Start</span>
+          <div class="nudge">
+            <button data-nudge="start:-1">&minus;1s</button>
+            <input type="text" id="tStart" inputmode="numeric">
+            <button data-nudge="start:1">+1s</button>
           </div>
         </div>
-        <div class="dims" id="dims">1080 × 1920</div>
-        <div class="summary" id="summary">9:16 · webcam on top at 42% height · gameplay below</div>
-        <ul class="notes" id="notes"></ul>
-        <div id="exact"></div>
-        <div id="warn"></div>
+        <div class="t-len" id="tLen">30.0s</div>
+        <div class="t-fld">
+          <span>End</span>
+          <div class="nudge">
+            <button data-nudge="end:-1">&minus;1s</button>
+            <input type="text" id="tEnd" inputmode="numeric">
+            <button data-nudge="end:1">+1s</button>
+          </div>
+        </div>
       </div>
+
+      <label class="check"><input type="checkbox" id="tMute"><span>Remove the audio from the saved file</span></label>
+      <div class="t-actions">
+        <button class="btn ghost" id="tReset">Reset</button>
+        <button class="btn primary" id="tApply">Apply and re-cut</button>
+      </div>
+      <p class="hint">Re-cuts straight from the downloaded source, so the span can grow as well as shrink.</p>
+      <div id="tMsg"></div>
     </div>
   </div>
-
-  <!-- ============ progress ============ -->
-  <div class="card" id="progress" style="margin-top:18px">
-    <h2>Working</h2>
-    <div class="stat">
-      <span id="stageLabel">Queued</span>
-      <span class="pct" id="pct">0%</span>
-    </div>
-    <div class="bar"><i id="barFill"></i></div>
-    <div class="log" id="log"></div>
-  </div>
-
-  <!-- ============ results ============ -->
-  <div class="card hidden" id="results" style="margin-top:18px">
-    <h2>Your clips</h2>
-    <button class="go upload" id="uploadBtn">Upload to YouTube</button>
-    <p class="upload-hint">Opens YouTube&rsquo;s upload page. Pick your clips from the folder below.</p>
-    <div class="clips" id="clips"></div>
-    <div id="filesPanel"></div>
-  </div>
-
 </div>
+
+<!-- ============================ mini player ============================ -->
+<div class="mini hidden" id="mini">
+  <video id="mVideo" playsinline preload="metadata"></video>
+  <div class="m-bar"><i id="mFill"></i></div>
+  <div class="m-controls">
+    <button class="ibtn sm" id="mPlay" title="Play / pause"><svg><use href="#i-pause"/></svg></button>
+    <button class="ibtn sm" id="mMute" title="Mute"><svg><use href="#i-vol"/></svg></button>
+    <span class="m-title" id="mTitle"></span>
+    <button class="ibtn sm" id="mExpand" title="Open the full player"><svg><use href="#i-expand"/></svg></button>
+    <button class="ibtn sm" id="mClose" title="Close"><svg><use href="#i-close"/></svg></button>
+  </div>
+</div>
+
+<!-- confirm + toast -->
+<div class="confirm hidden" id="confirm">
+  <div class="c-box">
+    <h3 id="cTitle">Delete this clip?</h3>
+    <p id="cText">The file is removed from your PC. This cannot be undone.</p>
+    <div class="c-actions">
+      <button class="btn ghost" id="cNo">Keep it</button>
+      <button class="btn danger" id="cYes">Delete</button>
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
 <script src="/static/app.js"></script>
 </body>
 </html>
