@@ -24,3 +24,8 @@ build/
 dist/
 *.spec
 bin/
+
+# local tooling — not part of the project
+# (.claude/skills is tracked on purpose, so only the launch config is ignored)
+.claude/launch.json
+.impeccable/
