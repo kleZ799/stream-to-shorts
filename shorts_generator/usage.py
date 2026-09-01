@@ -159,13 +159,17 @@ def mark_exhausted(provider: str, model: str = "") -> None:
 
 
 def is_exhausted(provider: str, model: str = "") -> bool:
-    """Whether this provider is known to be out of budget for today."""
+    """Whether the provider itself has said today's budget is gone.
+
+    Deliberately ignores the local count. The count is a guess -- it assumes
+    the free-tier limit and that this machine is the only thing spending the
+    key -- and refusing to call an API because a guess says so would strand
+    anyone on a paid plan after twenty requests. A 429 naming the daily quota
+    is the only thing that stops a run here.
+    """
     with _lock:
         entry = _read()["providers"].get(provider) or {}
-    if entry.get("exhausted"):
-        return True
-    limit = daily_limit(provider, model or entry.get("model", ""))
-    return bool(limit) and int(entry.get("requests", 0)) >= limit
+    return bool(entry.get("exhausted"))
 
 
 def snapshot() -> Dict:

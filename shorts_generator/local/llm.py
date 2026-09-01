@@ -1,13 +1,19 @@
 """Local LLM backend — OpenAI or Gemini, selected by LLM_PROVIDER."""
 import re
 import time
+from typing import Optional
 
+from .. import usage
 from ..config import (
     current_model,
     current_provider,
     require_gemini_key,
     require_openai_key,
 )
+
+
+class DailyQuotaExceeded(RuntimeError):
+    """The provider's per-day allowance is gone. Waiting will not help."""
 
 
 def call_openai_llm(prompt: str) -> str:
@@ -20,13 +26,28 @@ def call_openai_llm(prompt: str) -> str:
             "    pip install -r requirements-local.txt"
         ) from e
 
+    model = current_model("openai")
     client = OpenAI(api_key=require_openai_key())
     response = client.chat.completions.create(
-        model=current_model("openai"),
+        model=model,
         temperature=0.7,
         messages=[{"role": "user", "content": prompt}],
     )
+    usage.record("openai", model)
     return response.choices[0].message.content or ""
+
+
+def _is_daily_quota(msg: str) -> bool:
+    """Tell a per-day cap apart from a per-minute one.
+
+    They arrive as the same 429. The per-minute one clears in a minute and is
+    worth sleeping through; the per-day one does not clear until midnight
+    Pacific, so sleeping on it just wastes five minutes before failing anyway.
+    Google names the quota in the payload -- GenerateRequestsPerDayPerProject
+    -- which is the only reliable way to tell them apart.
+    """
+    lowered = msg.lower()
+    return "perday" in lowered.replace("_", "") or "per day" in lowered
 
 
 def call_gemini_llm(prompt: str) -> str:
@@ -39,6 +60,7 @@ def call_gemini_llm(prompt: str) -> str:
             "    pip install -r requirements-local.txt"
         ) from e
 
+    model = current_model("gemini")
     client = genai.Client(api_key=require_gemini_key())
     # Gemini 3.x spends part of the output budget on internal reasoning before
     # emitting any JSON, so 8192 truncates long-chunk responses mid-object.
@@ -53,18 +75,26 @@ def call_gemini_llm(prompt: str) -> str:
     # several ways — free-tier rate limits, capacity spikes, and plain network
     # timeouts — and none of them read the same in the error string. So the
     # rule is inverted: give up immediately only on errors that retrying can
-    # never fix (bad key, bad request), and retry everything else.
+    # never fix (bad key, bad request, a spent daily allowance), and retry
+    # everything else.
     attempts = 5
     last_error = None
     for attempt in range(attempts):
         try:
             response = client.models.generate_content(
-                model=current_model("gemini"), contents=prompt, config=config
+                model=model, contents=prompt, config=config
             )
             break
         except Exception as e:
             last_error = e
             msg = str(e)
+
+            if _is_daily_quota(msg):
+                usage.mark_exhausted("gemini", model)
+                raise DailyQuotaExceeded(
+                    f"Gemini's free-tier daily quota for {model} is used up. "
+                    f"It resets at midnight US Pacific."
+                ) from e
 
             permanent = any(t in msg for t in (
                 "API_KEY_INVALID", "API key not valid", "PERMISSION_DENIED",
@@ -89,6 +119,8 @@ def call_gemini_llm(prompt: str) -> str:
     else:
         raise last_error
 
+    usage.record("gemini", model)
+
     text = response.text or ""
     if not text.strip():
         # Surface *why* it came back empty instead of failing as "invalid JSON".
@@ -102,13 +134,61 @@ def call_gemini_llm(prompt: str) -> str:
     return text
 
 
+# Once a run has switched providers there is no point asking the spent one
+# again on every remaining chunk, so the choice sticks for the process.
+_fallback_provider: Optional[str] = None
+
+
+def _openai_is_configured() -> bool:
+    try:
+        return bool(require_openai_key())
+    except RuntimeError:
+        return False
+
+
+def _switch_to_openai(why: str) -> None:
+    global _fallback_provider
+    _fallback_provider = "openai"
+    print(f"[llm] {why} — continuing on OpenAI ({current_model('openai')})",
+          flush=True)
+
+
+def reset_fallback() -> None:
+    """Forget a previous switch, so a new run re-checks the preferred provider."""
+    global _fallback_provider
+    _fallback_provider = None
+
+
 def call_local_llm(prompt: str) -> str:
-    """Dispatch to the configured local LLM provider."""
-    provider = current_provider()
+    """Dispatch to the configured local LLM provider.
+
+    When Gemini's daily allowance runs out mid-run, hand the rest of the run
+    to OpenAI rather than losing a download and a transcription to a quota
+    that will not come back for hours. Without an OpenAI key there is nothing
+    to fall back to, so the original error stands.
+    """
+    provider = _fallback_provider or current_provider()
+
     if provider == "openai":
         return call_openai_llm(prompt)
-    if provider == "gemini":
+    if provider != "gemini":
+        raise RuntimeError(
+            f"Unknown LLM_PROVIDER={provider!r}. Use 'openai' or 'gemini'."
+        )
+
+    if usage.is_exhausted("gemini", current_model("gemini")):
+        if _openai_is_configured():
+            _switch_to_openai("today's Gemini quota is already spent")
+            return call_openai_llm(prompt)
+        raise DailyQuotaExceeded(
+            "Gemini's free-tier daily quota is already used up for today. "
+            "It resets at midnight US Pacific — or add an OpenAI key to keep going."
+        )
+
+    try:
         return call_gemini_llm(prompt)
-    raise RuntimeError(
-        f"Unknown LLM_PROVIDER={provider!r}. Use 'openai' or 'gemini'."
-    )
+    except DailyQuotaExceeded:
+        if not _openai_is_configured():
+            raise
+        _switch_to_openai("Gemini's daily quota ran out")
+        return call_openai_llm(prompt)
