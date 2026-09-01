@@ -13,7 +13,7 @@ The keyword pass runs first and its results win, so a prompt like
 "square, webcam top right" never needs a network call at all. The LLM is
 only consulted when the prompt said something the keywords missed.
 """
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields as dataclass_fields
 from typing import Dict, List, Optional
 import json
 import re
@@ -85,7 +85,9 @@ class LayoutSpec:
     webcam_corner: str = "bottom-left"
     cam_panel_fraction: float = 0.42
     face_zoom: float = 5.0
-    num_clips: int = 5
+    # Ten is the ceiling and the default: one run should hand back a full
+    # week's posting slate, ranked, rather than three clips and another wait.
+    num_clips: int = 10
     # Render at the best size the source actually supports rather than the
     # platform-minimum preset. Off means always use ASPECT_PRESETS.
     match_source_quality: bool = True
@@ -138,6 +140,24 @@ class LayoutSpec:
         d["height"] = self.height
         return d
 
+    @classmethod
+    def from_dict(cls, data: Optional[Dict]) -> "LayoutSpec":
+        """Rebuild a spec from its own to_dict output.
+
+        Used when a job is restored from disk, so re-cutting one of its clips
+        months later still renders in the layout it was first made with.
+        Unknown and missing keys fall back to the defaults; validate() then
+        clamps whatever survived.
+        """
+        spec = cls()
+        if not isinstance(data, dict):
+            return spec.validate()
+        fields = {f.name for f in dataclass_fields(cls)}
+        for key, value in data.items():
+            if key in fields and value is not None:
+                setattr(spec, key, value)
+        return spec.validate()
+
     def warning(self) -> Optional[str]:
         """A caveat worth showing before the user commits to a long render."""
         if self.layout == "facetrack":
@@ -151,10 +171,13 @@ class LayoutSpec:
 
     def describe(self) -> str:
         """One-line human summary, for the UI and the logs."""
-        prefix = ""
         if self.time_ranges:
             n = len(self.time_ranges)
             prefix = f"{n} exact cut{'s' if n > 1 else ''} · "
+        else:
+            # Say the count up front: it is the number of Shorts the run hands
+            # back, and the one setting people most often want to change.
+            prefix = f"{self.num_clips} clip{'s' if self.num_clips > 1 else ''} · "
         return prefix + self._describe_layout()
 
     def _describe_layout(self) -> str:
