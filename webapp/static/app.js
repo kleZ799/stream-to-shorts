@@ -200,15 +200,25 @@ async function refreshUsage() {
     const g = u.providers.gemini || null;
     const o = u.providers.openai || null;
 
-    const rows = [];
-    if (g) {
-      const val = g.limit
-        ? `${g.used} of ${g.limit} used${g.exhausted ? " — spent" : ` · ${g.remaining} left`}`
-        : `${g.used} used`;
-      rows.push(`<div><span>Gemini</span><b>${esc(val)}</b></div>`);
+    // The bar only means something against a known cap. OpenAI has no daily
+    // limit to fill, so it stays a number and the bar stays hidden.
+    const meter = $("usageMeter");
+    const capped = g && g.limit;
+    meter.hidden = !capped;
+    if (capped) {
+      const frac = Math.min(1, g.used / g.limit);
+      const fill = $("meterFill");
+      fill.style.width = `${Math.round(frac * 100)}%`;
+      fill.classList.toggle("warn", frac >= 0.7 && frac < 1);
+      fill.classList.toggle("spent", frac >= 1);
+      $("meterLabel").textContent = g.exhausted ? "Gemini — spent" : "Gemini requests";
+      $("meterCount").textContent = `${g.used} / ${g.limit}`;
     }
+
+    const rows = [];
+    if (g && !capped) rows.push(`<div><span>Gemini</span><b>${g.used} used</b></div>`);
     if (o) rows.push(`<div><span>OpenAI</span><b>${o.used} used</b></div>`);
-    if (!rows.length) rows.push(`<div><span>Requests</span><b>none yet today</b></div>`);
+    if (!g && !o) rows.push(`<div><span>Requests</span><b>none yet today</b></div>`);
     rows.push(`<div><span>Resets in</span><b>${fmtSpan(u.resets_in_seconds)}</b></div>`);
     $("usageInfo").innerHTML = rows.join("");
 

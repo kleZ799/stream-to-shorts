@@ -1441,3 +1441,31 @@ body.player-on .player-body { transform: none; }
 }
 .ar-row .chipbar { gap: 8px; }
 .ar-row .chip { height: 30px; font-size: 13px; }
+
+/* The daily API budget as a bar, because "17 of 20" reads as a number you
+   have to think about and a nearly-full bar does not. */
+.meter { margin-bottom: 14px; }
+.meter-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 6px;
+  color: var(--text-2);
+  font-size: 13px;
+}
+.meter-top b { color: var(--text); font-weight: 500; }
+.meter-track {
+  height: 6px;
+  border-radius: var(--pill);
+  background: var(--raised-2);
+  overflow: hidden;
+}
+.meter-fill {
+  height: 100%;
+  width: 0;
+  border-radius: var(--pill);
+  background: var(--ok);
+  transition: width var(--med), background var(--med);
+}
+.meter-fill.warn { background: var(--warn); }
+.meter-fill.spent { background: var(--err); }
