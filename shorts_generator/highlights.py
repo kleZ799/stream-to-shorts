@@ -12,6 +12,7 @@ drive either MuAPI (default, --mode api) or a direct local LLM client
 """
 import json
 import re
+from pathlib import Path
 from typing import Callable, Dict, List, Optional
 
 from . import muapi
@@ -319,15 +320,56 @@ def dedupe_highlights(highlights: List[Dict]) -> List[Dict]:
     return kept
 
 
+def _checkpoint_fingerprint(duration: float, chunk_count: int, num_clips: int) -> str:
+    """Identifies the run a saved checkpoint belongs to."""
+    return f"{duration:.0f}|{chunk_count}|{num_clips}"
+
+
+def _load_checkpoint(path: Optional[Path], fingerprint: str) -> Dict[str, List[Dict]]:
+    """Chunks already ranked on an earlier attempt, keyed by chunk index."""
+    if not path or not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
+    except Exception:
+        return {}
+    if not isinstance(data, dict) or data.get("fingerprint") != fingerprint:
+        # A different video, or the same one asked a different question.
+        return {}
+    chunks = data.get("chunks")
+    return chunks if isinstance(chunks, dict) else {}
+
+
+def _save_checkpoint(path: Optional[Path], fingerprint: str,
+                     chunks: Dict[str, List[Dict]]) -> None:
+    if not path:
+        return
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps({"fingerprint": fingerprint, "chunks": chunks}, indent=2),
+            encoding="utf-8",
+        )
+    except OSError:
+        # Losing the ability to resume is not a reason to fail the run.
+        pass
+
+
 def get_highlights(
     transcript: Dict,
     num_clips: int = 3,
     llm_fn: Optional[LLMFn] = None,
+    checkpoint_path: Optional[Path] = None,
 ) -> Dict:
     """Main entry point — returns {highlights: [...]} sorted by score.
 
     `llm_fn` swaps the underlying LLM. Defaults to MuAPI gpt-5-mini; local
     mode passes in a local LLM-backed callable.
+
+    `checkpoint_path` makes a long video resumable. Each chunk costs an API
+    request, and a nine-chunk video that dies on chunk three used to throw
+    away the two it had already paid for -- so every finished chunk is written
+    out, and a later attempt picks up where the quota ran out.
     """
     llm_fn = llm_fn or call_muapi_llm
     duration = transcript.get("duration", 0)
@@ -337,16 +379,36 @@ def get_highlights(
     if duration >= LONG_VIDEO_THRESHOLD:
         chunks = chunk_transcript(transcript)
         print(f"[highlights] long video — splitting into {len(chunks)} chunks", flush=True)
+
+        fingerprint = _checkpoint_fingerprint(duration, len(chunks), num_clips)
+        done = _load_checkpoint(checkpoint_path, fingerprint)
+        if done:
+            print(f"[highlights] resuming — {len(done)}/{len(chunks)} chunk(s) "
+                  f"already ranked earlier", flush=True)
+
         all_highlights: List[Dict] = []
         for i, chunk in enumerate(chunks):
             offset = chunk.get("_offset", 0)
+            key = str(i)
+            if key in done:
+                all_highlights.extend(done[key])
+                continue
+
             text = build_transcript_text(chunk)
             print(f"[highlights] chunk {i + 1}/{len(chunks)} (offset {offset:.0f}s)", flush=True)
             result = call_highlight_api(text, content_info, chunk["duration"], num_clips=num_clips, is_chunk=True, llm_fn=llm_fn)
+            ranked = []
             for h in result.get("highlights", []):
                 h["start_time"] = float(h["start_time"]) + offset
                 h["end_time"] = float(h["end_time"]) + offset
-                all_highlights.append(h)
+                ranked.append(h)
+            all_highlights.extend(ranked)
+
+            # Written per chunk, not at the end: the whole point is to survive
+            # the failure that happens on the *next* one.
+            done[key] = ranked
+            _save_checkpoint(checkpoint_path, fingerprint, done)
+
         highlights = dedupe_highlights(all_highlights)
     else:
         text = build_transcript_text(transcript)
