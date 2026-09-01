@@ -32,17 +32,28 @@ def config_path() -> Path:
 
 
 def load() -> Dict:
+    """Read the stored config, or {} if there is nothing readable there."""
     try:
-        return json.loads(config_path().read_text(encoding="utf-8"))
+        # utf-8-sig so a BOM left by a hand-edit doesn't read as a corrupt file.
+        return json.loads(config_path().read_text(encoding="utf-8-sig"))
     except Exception:
         return {}
 
 
 def save(values: Dict) -> Path:
-    """Merge `values` into the stored config and write it back."""
-    current = load()
-    current.update({k: v for k, v in values.items() if v is not None})
+    """Merge `values` into the stored config and write it back.
+
+    Refuses to write when a config file exists but won't parse: this file holds
+    the user's API key, and merging onto a silently-empty dict would drop it.
+    """
     path = config_path()
+    current = load()
+    if not current and path.exists() and path.stat().st_size > 0:
+        raise RuntimeError(
+            f"{path} exists but could not be parsed as JSON. Refusing to overwrite it "
+            f"and lose the settings it holds — fix or move the file, then retry."
+        )
+    current.update({k: v for k, v in values.items() if v is not None})
     path.write_text(json.dumps(current, indent=2), encoding="utf-8")
     try:
         # The file holds an API key — keep it owner-only where that's meaningful.
