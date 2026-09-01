@@ -1427,3 +1427,17 @@ body.player-on .player-body { transform: none; }
     scroll-behavior: auto !important;
   }
 }
+
+/* ==================== aspect toggle + usage meter ==================== */
+
+/* Sits under the layout prompt: an explicit pick, for when describing the
+   shape in words is more effort than clicking it. */
+.ar-row { margin-top: 14px; }
+.ar-label {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--text-2);
+  font: 500 13px/1 inherit;
+}
+.ar-row .chipbar { gap: 8px; }
+.ar-row .chip { height: 30px; font-size: 13px; }

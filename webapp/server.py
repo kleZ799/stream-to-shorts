@@ -42,6 +42,9 @@ class ResolveRequest(BaseModel):
 class LayoutPreviewRequest(BaseModel):
     prompt: str = ""
     use_llm: bool = True
+    # An explicit pick from the UI toggle. None means "whatever the words say",
+    # which is how this worked before the toggle existed.
+    aspect_ratio: Optional[str] = None
 
 
 class JobRequest(BaseModel):
@@ -51,6 +54,7 @@ class JobRequest(BaseModel):
     download_format: str = "best"
     language: Optional[str] = None
     use_llm: bool = True
+    aspect_ratio: Optional[str] = None
 
 
 # --- routes ---------------------------------------------------------------
@@ -367,11 +371,25 @@ async def open_upload() -> dict:
     return {"opened": ok, "url": url}
 
 
+def _override_aspect(spec: LayoutSpec, aspect_ratio: Optional[str]) -> None:
+    """Let an explicit UI pick beat whatever the prompt implied.
+
+    A toggle the user clicked is a clearer statement of intent than a word the
+    parser inferred, so it wins. An unknown ratio is ignored rather than
+    clamped to 9:16, so a stale client cannot silently change the shape of
+    someone's clips.
+    """
+    if aspect_ratio and aspect_ratio in ASPECT_PRESETS:
+        spec.aspect_ratio = aspect_ratio
+        spec.validate()
+
+
 @app.post("/api/layout/preview")
 async def layout_preview(req: LayoutPreviewRequest) -> dict:
     """Parse a layout prompt without running anything, so the UI can show
     the user what their words actually did before they commit to a render."""
     spec = await asyncio.to_thread(parse_layout_prompt, req.prompt, None, req.use_llm)
+    _override_aspect(spec, req.aspect_ratio)
     return {"spec": spec.to_dict(), "summary": spec.describe(),
             "notes": spec.notes, "warning": spec.warning()}
 
@@ -425,6 +443,7 @@ async def create_job(req: JobRequest) -> dict:
         raise HTTPException(400, "No source given")
 
     spec = await asyncio.to_thread(parse_layout_prompt, req.prompt, None, req.use_llm)
+    _override_aspect(spec, req.aspect_ratio)
     if req.num_clips:
         spec.num_clips = req.num_clips
         spec.validate()

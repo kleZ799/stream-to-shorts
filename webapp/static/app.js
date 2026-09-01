@@ -517,12 +517,25 @@ function drawPreview(spec, summary, notes, warning) {
     : "";
 }
 
+// "" means the prompt decides, which is how this behaved before the toggle.
+let aspectChoice = "";
+
 async function refreshPreview() {
   try {
-    const d = await api("/api/layout/preview", json("POST", { prompt: $("prompt").value, use_llm: true }));
+    const d = await api("/api/layout/preview", json("POST", {
+      prompt: $("prompt").value, use_llm: true, aspect_ratio: aspectChoice || null,
+    }));
     drawPreview(d.spec, d.summary, d.notes, d.warning);
   } catch (_) { /* the preview is cosmetic — never block on it */ }
 }
+
+$("arBar").onclick = (e) => {
+  const btn = e.target.closest("[data-ar]");
+  if (!btn) return;
+  aspectChoice = btn.dataset.ar;
+  for (const b of $("arBar").querySelectorAll(".chip")) b.classList.toggle("on", b === btn);
+  refreshPreview();   // the preview is the only proof the pick landed
+};
 
 $("chips").innerHTML = EXAMPLES.map((e) =>
   `<button class="chip" data-t="${esc(e)}">${esc(e)}</button>`).join("");
@@ -575,6 +588,7 @@ async function run() {
       source: source.source,
       prompt: $("prompt").value,
       download_format: $("format").value,
+      aspect_ratio: aspectChoice || null,
     }));
   } catch (e) {
     showErr(e.message);
