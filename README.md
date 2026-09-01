@@ -14,7 +14,7 @@ No subscription. No per-clip credits. No watermark. No uploading your VODs to so
 
 ### [⬇ Download StreamToShorts.exe](https://github.com/kleZ799/stream-to-shorts/releases/latest/download/StreamToShorts.exe)
 
-Windows · 153 MB · no Python needed
+Windows · 229 MB · no Python, no ffmpeg, nothing to install
 
 </div>
 
@@ -24,10 +24,9 @@ Windows · 153 MB · no Python needed
 
 Download [**StreamToShorts.exe**](https://github.com/kleZ799/stream-to-shorts/releases/latest/download/StreamToShorts.exe) and double-click it. There is no installer and nothing to set up first.
 
-Two things to know on first run:
+One thing to know on first run: **Windows will warn you.** The exe isn't code-signed, so SmartScreen shows *"Windows protected your PC"*. Click **More info → Run anyway**.
 
-- **Windows will warn you.** The exe isn't code-signed, so SmartScreen shows *"Windows protected your PC"*. Click **More info → Run anyway**.
-- **You need ffmpeg.** It isn't bundled — the full build is over 400 MB by itself. Install it once with `winget install Gyan.FFmpeg`, then restart the app. The app checks at startup and tells you if it can't find it.
+ffmpeg is bundled, so there is nothing else to install. First launch takes a few seconds while the single file unpacks itself.
 
 The app asks for a [free Gemini API key](https://aistudio.google.com/apikey) the first time you open it, and stores it at `%APPDATA%\StreamToShorts\settings.json`. Clips go to `%USERPROFILE%\Videos\StreamToShorts` unless you change that in Settings.
 
@@ -338,3 +337,8 @@ Conflicts, when they happen, land almost entirely in `highlights.py` — upstrea
 ## License
 
 MIT — see [LICENSE](LICENSE). Upstream work © Anil Chandra Naidu Matcha; modifications © Parth Bhadana.
+
+The published `StreamToShorts.exe` also carries ffmpeg and ffprobe (the
+[gyan.dev](https://www.gyan.dev/ffmpeg/builds/) essentials build), which are licensed under the
+GPL v3 — not MIT. That covers the bundled binaries only; this repository's own
+source stays MIT, and building from source pulls in no ffmpeg at all.
