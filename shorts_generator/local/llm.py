@@ -56,6 +56,31 @@ def list_gemini_models(force: bool = False) -> List[str]:
     return names
 
 
+def check_gemini_model(model: str) -> Optional[str]:
+    """Try the model once. Returns None if it works, else why it does not.
+
+    ListModels is not proof of anything: it happily returns models that answer
+    "no longer available to new users" when you actually call them, and that
+    404 used to surface nine chunks into a run. One tiny request at the moment
+    of choosing is far cheaper than discovering it later.
+    """
+    try:
+        from google import genai  # type: ignore
+        client = genai.Client(api_key=require_gemini_key())
+        client.models.generate_content(model=model, contents="hi",
+                                       config={"max_output_tokens": 1})
+        return None
+    except Exception as e:
+        msg = str(e)
+        if "429" in msg:
+            return None     # it exists and answers; today's allowance is just spent
+        if "no longer available" in msg or "404" in msg:
+            return f"{model} is not available on this API key."
+        if "503" in msg:
+            return f"{model} is temporarily unavailable — try another."
+        return f"{model} could not be used: {msg.splitlines()[0][:120]}"
+
+
 class DailyQuotaExceeded(RuntimeError):
     """The provider's per-day allowance is gone. Waiting will not help."""
 

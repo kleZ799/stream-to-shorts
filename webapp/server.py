@@ -208,7 +208,16 @@ async def set_settings(req: SettingsRequest) -> dict:
     if key:
         values[key_name] = key
     if req.model:
-        values["GEMINI_MODEL" if provider == "gemini" else "OPENAI_MODEL"] = req.model.strip()
+        model = req.model.strip()
+        if provider == "gemini":
+            # Prove it works before storing it, so a dead model is caught here
+            # rather than partway through a render that already cost a
+            # download and a transcription.
+            from shorts_generator.local.llm import check_gemini_model
+            problem = await asyncio.to_thread(check_gemini_model, model)
+            if problem:
+                raise HTTPException(400, problem)
+        values["GEMINI_MODEL" if provider == "gemini" else "OPENAI_MODEL"] = model
     if req.daily_limit is not None:
         cap = req.daily_limit.strip()
         if cap and not cap.isdigit():
