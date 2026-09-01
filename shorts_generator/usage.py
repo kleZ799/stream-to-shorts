@@ -25,10 +25,11 @@ from . import user_config
 # worth modelling, so DAILY_LIMIT_UNKNOWN means "don't pretend to know".
 DAILY_LIMIT_UNKNOWN = 0
 FREE_TIER_DAILY_LIMITS = {
-    "gemini-3.6-flash": 20,
+    "gemini-2.5-flash-lite": 1000,
     "gemini-2.5-flash": 250,
-    "gemini-2.5-pro": 100,
     "gemini-2.0-flash": 200,
+    "gemini-2.5-pro": 100,
+    "gemini-3.6-flash": 20,
 }
 
 USAGE_FILENAME = "usage.json"
