@@ -83,6 +83,10 @@ class SettingsRequest(BaseModel):
     provider: str = "gemini"
     api_key: str = ""
     model: Optional[str] = None
+    # Store the key but keep the current provider — this is how an OpenAI key
+    # gets saved as the thing that takes over when Gemini's day runs out,
+    # rather than as a switch away from Gemini.
+    as_fallback: bool = False
 
 
 @app.get("/api/settings")
@@ -107,6 +111,21 @@ async def get_settings() -> dict:
     }
 
 
+@app.get("/api/usage")
+async def get_usage() -> dict:
+    """Today's API spend, so the daily cap is visible before it bites."""
+    from shorts_generator import usage, user_config
+    from shorts_generator.config import current_model, current_provider
+
+    snap = usage.snapshot()
+    provider = current_provider()
+    snap["provider"] = provider
+    snap["model"] = current_model(provider)
+    # Whether a spent Gemini day would actually be survivable.
+    snap["fallback_ready"] = bool(user_config.get("OPENAI_API_KEY"))
+    return snap
+
+
 @app.post("/api/settings")
 async def set_settings(req: SettingsRequest) -> dict:
     from shorts_generator import user_config
@@ -119,7 +138,7 @@ async def set_settings(req: SettingsRequest) -> dict:
     if not key:
         raise HTTPException(400, "Paste an API key first.")
 
-    values = {"LLM_PROVIDER": provider}
+    values = {} if req.as_fallback else {"LLM_PROVIDER": provider}
     values["GEMINI_API_KEY" if provider == "gemini" else "OPENAI_API_KEY"] = key
     if req.model:
         values["GEMINI_MODEL" if provider == "gemini" else "OPENAI_MODEL"] = req.model.strip()
