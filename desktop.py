@@ -73,6 +73,31 @@ def _free_port() -> int:
         return int(s.getsockname()[1])
 
 
+# A fixed port nobody else is likely to want, bound for the lifetime of the
+# process purely as a mutex. Windows refuses the second bind, which is the
+# whole trick.
+LOCK_PORT = 50507
+
+
+def _claim_single_instance() -> Optional[socket.socket]:
+    """Return a held socket, or None if this app is already running.
+
+    A slow start looks exactly like a dead one, so the natural reaction is to
+    click the icon again. Four copies each unpacking themselves and loading
+    the same models is how a slow start becomes a failed one -- so only the
+    first copy gets to run. SO_REUSEADDR is deliberately not set: the default
+    refusal is the lock.
+    """
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        s.bind(("127.0.0.1", LOCK_PORT))
+        s.listen(1)
+    except OSError:
+        s.close()
+        return None
+    return s
+
+
 # A cold start pays for imports of faster-whisper, ctranslate2, cv2 and the
 # Google client, read off disk while the virus scanner reads them too. Sixty
 # seconds was enough warm and not enough cold, which showed up as a taskbar
@@ -122,6 +147,13 @@ def _serve(port: int) -> None:
 
 def main() -> int:
     _prepare_environment()
+
+    lock = _claim_single_instance()
+    if lock is None:
+        _alert(f"{APP_NAME} is already running.\n\n"
+               f"Look for its window — if you just clicked the icon, the "
+               f"first start can take a moment.", error=False)
+        return 0
 
     port = _free_port()
     url = f"http://127.0.0.1:{port}"
