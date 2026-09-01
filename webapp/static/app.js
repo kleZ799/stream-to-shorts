@@ -8,12 +8,14 @@ const $ = (id) => document.getElementById(id);
 const body = document.body;
 
 const EXAMPLES = [
+  "30 seconds only",
+  "between 20 and 40 seconds",
+  "only the funny rage moments",
+  "hooks that ask a question",
   "webcam at the top",
   "my webcam is bottom right",
-  "square, bigger webcam",
   "gameplay only, no webcam",
   "follow my face",
-  "zoom in tighter on my face",
   "just 5 clips",
   "cut 14:45 to 15:30",
 ];

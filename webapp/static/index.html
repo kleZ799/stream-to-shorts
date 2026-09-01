@@ -73,7 +73,7 @@
 
   <nav class="guide" id="guide">
     <a class="g-item active" data-go="secCreate"><svg><use href="#i-spark"/></svg><span>Create</span></a>
-    <a class="g-item" data-go="secLayout"><svg><use href="#i-film"/></svg><span>Layout</span></a>
+    <a class="g-item" data-go="secLayout"><svg><use href="#i-film"/></svg><span>What to make</span></a>
     <a class="g-item" data-go="results"><svg><use href="#i-play"/></svg><span>Your clips</span><i class="g-count hidden" id="gCount"></i></a>
     <div class="g-div"></div>
     <a class="g-item" id="gSettings"><svg><use href="#i-gear"/></svg><span>Settings</span></a>
@@ -148,10 +148,10 @@
         <!-- 2 · layout -->
         <section class="panel" id="secLayout">
           <div class="p-head">
-            <h2><span class="step">2</span>Layout</h2>
-            <span class="p-hint">Plain English, or an exact span</span>
+            <h2><span class="step">2</span>What to make</h2>
+            <span class="p-hint">Length, angle, framing &mdash; plain English</span>
           </div>
-          <textarea id="prompt" placeholder="e.g. put my webcam at the top, vertical for Shorts, 5 clips&#10;&#10;Or name an exact span: cut 14:45 to 15:30"></textarea>
+          <textarea id="prompt" rows="5" placeholder="Describe the shorts you want.&#10;&#10;How long:  30 seconds only  ·  between 20 and 40 seconds  ·  about a minute&#10;What kind: only the funny rage moments  ·  hooks that ask a question&#10;Framing:   webcam at the top  ·  follow my face  ·  5 clips&#10;&#10;Or name an exact span: cut 14:45 to 15:30"></textarea>
           <div class="ar-row">
             <span class="ar-label">Shape</span>
             <div class="chipbar" id="arBar">
