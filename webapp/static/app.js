@@ -180,6 +180,7 @@ async function checkSetup() {
     }
     keysOnFile = d.keys || {};
     providerPinned = !!d.provider_pinned;
+    drawModels(d);
     if (d.daily_limits) $("capOpenai").value = d.daily_limits.openai || "";
     drawSwitcher(d.provider);
     $("setInfo").innerHTML = `
@@ -191,6 +192,48 @@ async function checkSetup() {
         + `Install it from ffmpeg.org, then restart this app.</div>`;
     }
   } catch (_) { /* an offline settings check is not worth blocking startup */ }
+}
+
+// Which Gemini model you are on decides how many free runs a day you get —
+// 20 on one, hundreds on another. That number belongs next to the choice,
+// not in a docs page you would have to go looking for.
+function drawModels(d) {
+  const fld = $("modelFld"), sel = $("setModel"), hint = $("modelHint");
+  const models = d.gemini_models || [];
+  if (d.provider !== "gemini" || !models.length) { fld.hidden = true; hint.textContent = ""; return; }
+
+  fld.hidden = false;
+  sel.innerHTML = models.map((m) =>
+    `<option value="${esc(m.value)}">${esc(m.value)} — ${m.daily_free}/day free</option>`).join("");
+  if (models.some((m) => m.value === d.model)) sel.value = d.model;
+  else sel.insertAdjacentHTML("afterbegin",
+    `<option value="${esc(d.model)}" selected>${esc(d.model)} — limit unknown</option>`);
+
+  if (d.model_pinned) {
+    sel.disabled = true;
+    hint.textContent = "GEMINI_MODEL in your environment is deciding this one.";
+    return;
+  }
+  sel.disabled = false;
+  hint.textContent = "Google's published free-tier limits. They change — the app "
+    + "trusts a real quota error over this number.";
+  sel.onchange = () => saveModel(sel.value);
+}
+
+async function saveModel(model) {
+  const hint = $("modelHint");
+  try {
+    // as_fallback: change the model, not which provider is active.
+    await api("/api/settings", json("POST", {
+      provider: "gemini", model, as_fallback: true,
+    }));
+    await checkSetup();
+    refreshUsage();
+    toast(`Now using ${model}.`);
+  } catch (e) {
+    hint.textContent = e.message || "Could not change the model.";
+    toast(e.message || "Could not change the model.", true);
+  }
 }
 
 // Which providers already have a key on disk, so the switcher can offer a

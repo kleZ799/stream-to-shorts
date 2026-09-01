@@ -103,7 +103,7 @@ async def get_settings() -> dict:
     Never returns the key itself — only whether one is present, and where
     it came from, so the user knows which knob actually controls it.
     """
-    from shorts_generator import user_config
+    from shorts_generator import usage, user_config
     from shorts_generator.config import current_model, current_provider
 
     provider = current_provider()
@@ -129,6 +129,16 @@ async def get_settings() -> dict:
         # by design. Saying so is the difference between a switch that looks
         # broken and one that explains itself.
         "provider_pinned": bool(os.getenv("LLM_PROVIDER", "").strip()),
+        # The free allowance differs enormously between Gemini models — 20 a
+        # day on one, hundreds on another — and picking the wrong one is the
+        # difference between a working afternoon and a paid API. Offered here
+        # so the choice is made with the number in view.
+        "gemini_models": [
+            {"value": name, "daily_free": limit}
+            for name, limit in sorted(usage.FREE_TIER_DAILY_LIMITS.items(),
+                                      key=lambda kv: -kv[1])
+        ],
+        "model_pinned": bool(os.getenv("GEMINI_MODEL", "").strip()),
     }
 
 
