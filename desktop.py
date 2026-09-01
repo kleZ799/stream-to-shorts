@@ -47,6 +47,48 @@ def _prepare_environment() -> None:
         os.environ.setdefault("LOCAL_OUTPUT_DIR", "output")
 
 
+LOG_FILENAME = "app.log"
+
+
+def _stream_is_usable(stream) -> bool:
+    """Whether something can be treated as a real output stream."""
+    try:
+        stream.isatty()
+        return True
+    except Exception:
+        return False
+
+
+def _attach_streams() -> None:
+    """Give the app real stdout/stderr, because a windowed build has none.
+
+    Launched from Explorer or the taskbar there is no console, so PyInstaller
+    leaves sys.stdout and sys.stderr as None. print() tolerates that, but any
+    library reaching for a stream does not: uvicorn's log config calls
+    sys.stdout.isatty() and reports the AttributeError as "Unable to configure
+    formatter 'default'", which killed the engine thread before it could bind
+    a port -- an icon that spun and then did nothing.
+
+    Pointing both at a log file fixes the crash and leaves something to read
+    after a launch goes wrong. Redirected runs already have real streams and
+    are left alone, which is exactly why this never showed up in testing.
+    """
+    if _stream_is_usable(sys.stdout) and _stream_is_usable(sys.stderr):
+        return
+
+    try:
+        log = open(os.path.join(os.getcwd(), LOG_FILENAME), "a",
+                   encoding="utf-8", buffering=1)
+        log.write(f"\n--- {APP_NAME} started {time.strftime('%Y-%m-%d %H:%M:%S')} ---\n")
+    except OSError:
+        log = open(os.devnull, "w")
+
+    if not _stream_is_usable(sys.stdout):
+        sys.stdout = log
+    if not _stream_is_usable(sys.stderr):
+        sys.stderr = log
+
+
 def _alert(message: str, *, error: bool = True) -> None:
     """Tell the user something, even with no console to tell them through.
 
@@ -147,6 +189,7 @@ def _serve(port: int) -> None:
 
 def main() -> int:
     _prepare_environment()
+    _attach_streams()   # after the chdir, so the log lands in the app's folder
 
     lock = _claim_single_instance()
     if lock is None:
