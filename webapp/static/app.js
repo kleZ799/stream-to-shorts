@@ -178,6 +178,10 @@ async function checkSetup() {
       $("setProvider").value = d.provider;
       $("setProvider2").value = d.provider;
     }
+    keysOnFile = d.keys || {};
+    providerPinned = !!d.provider_pinned;
+    if (d.daily_limits) $("capOpenai").value = d.daily_limits.openai || "";
+    drawSwitcher(d.provider);
     $("setInfo").innerHTML = `
       <div><span>Key</span><b>${d.has_key ? "set — from " + esc(d.source) : "not set"}</b></div>
       <div><span>Model</span><b>${esc(d.model || "—")}</b></div>
@@ -189,9 +193,71 @@ async function checkSetup() {
   } catch (_) { /* an offline settings check is not worth blocking startup */ }
 }
 
+// Which providers already have a key on disk, so the switcher can offer a
+// flip instead of demanding a secret that was saved hours ago.
+let keysOnFile = {};
+let providerPinned = false;
+
+function drawSwitcher(active) {
+  const other = active === "gemini" ? "openai" : "gemini";
+  const label = other === "gemini" ? "Gemini" : "OpenAI";
+  const el = $("switcher");
+  if (!keysOnFile[other]) { el.hidden = true; return; }
+  el.hidden = false;
+
+  // An LLM_PROVIDER env var wins over the settings file, so saving here would
+  // change nothing visible. Better to say that than to offer a dead button.
+  if (providerPinned) {
+    $("switchNote").textContent =
+      `${label} is set up, but LLM_PROVIDER in your environment is deciding.`;
+    $("switchBtn").hidden = true;
+    return;
+  }
+  $("switchBtn").hidden = false;
+  $("switchNote").textContent = `${label} is set up too.`;
+  $("switchBtn").textContent = `Use ${label}`;
+  $("switchBtn").onclick = () => switchProvider(other);
+}
+
+async function switchProvider(provider) {
+  const btn = $("switchBtn");
+  btn.disabled = true;
+  const was = btn.textContent;
+  btn.textContent = "Switching…";
+  try {
+    // No api_key: the server falls back to the stored one for this provider.
+    await api("/api/settings", json("POST", { provider }));
+    await checkSetup();
+    refreshUsage();
+    toast(`Now using ${provider === "gemini" ? "Gemini" : "OpenAI"}.`);
+  } catch (e) {
+    toast(e.message || "Could not switch provider.", true);
+    btn.textContent = was;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
 function fmtSpan(sec) {
   const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60);
   return h ? `${h}h ${m}m` : `${m}m`;
+}
+
+// One bar per provider that has a number worth filling. Gemini's comes from
+// the free tier; OpenAI has no daily cap of its own, so its bar only appears
+// once the user sets one — a meter against an invented limit would be worse
+// than no meter at all.
+function meterHtml(name, p) {
+  if (!p || !p.limit) return "";
+  const frac = Math.min(1, p.used / p.limit);
+  const cls = frac >= 1 ? "spent" : (frac >= 0.7 ? "warn" : "");
+  const label = p.exhausted ? `${name} — spent` : `${name} requests`;
+  return `<div class="meter">
+    <div class="meter-top"><span>${esc(label)}</span><b>${p.used} / ${p.limit}</b></div>
+    <div class="meter-track">
+      <div class="meter-fill ${cls}" style="width:${Math.round(frac * 100)}%"></div>
+    </div>
+  </div>`;
 }
 
 // A long video costs roughly one request per 20 minutes plus two, so ten left
@@ -230,24 +296,17 @@ async function refreshUsage() {
 
     // The bar only means something against a known cap. OpenAI has no daily
     // limit to fill, so it stays a number and the bar stays hidden.
-    const meter = $("usageMeter");
-    const capped = g && g.limit;
-    meter.hidden = !capped;
-    if (capped) {
-      const frac = Math.min(1, g.used / g.limit);
-      const fill = $("meterFill");
-      fill.style.width = `${Math.round(frac * 100)}%`;
-      fill.classList.toggle("warn", frac >= 0.7 && frac < 1);
-      fill.classList.toggle("spent", frac >= 1);
-      $("meterLabel").textContent = g.exhausted ? "Gemini — spent" : "Gemini requests";
-      $("meterCount").textContent = `${g.used} / ${g.limit}`;
-    }
+    $("meters").innerHTML = [
+      meterHtml("Gemini", g),
+      meterHtml("OpenAI", o),
+    ].filter(Boolean).join("");
 
     drawBudget(g, u);
 
     const rows = [];
-    if (g && !capped) rows.push(`<div><span>Gemini</span><b>${g.used} used</b></div>`);
-    if (o) rows.push(`<div><span>OpenAI</span><b>${o.used} used</b></div>`);
+    // Anything without a cap has no bar, so it still needs a plain count.
+    if (g && !g.limit) rows.push(`<div><span>Gemini</span><b>${g.used} used</b></div>`);
+    if (o && !o.limit) rows.push(`<div><span>OpenAI</span><b>${o.used} used</b></div>`);
     if (!g && !o) rows.push(`<div><span>Requests</span><b>none yet today</b></div>`);
     rows.push(`<div><span>Resets in</span><b>${fmtSpan(u.resets_in_seconds)}</b></div>`);
     $("usageInfo").innerHTML = rows.join("");
@@ -1363,6 +1422,23 @@ refreshPreview();
 
 // Deliberately not saveKey(): that switches the active provider, and this key
 // is meant to sit behind Gemini rather than replace it.
+$("capSave").onclick = async () => {
+  const msg = $("capMsg"), btn = $("capSave");
+  btn.disabled = true;
+  try {
+    // as_fallback keeps this from switching the active provider to OpenAI.
+    await api("/api/settings", json("POST", {
+      provider: "openai", daily_limit: $("capOpenai").value.trim(), as_fallback: true,
+    }));
+    msg.innerHTML = `<div class="ok-box">Saved. The OpenAI meter will fill against it.</div>`;
+    refreshUsage();
+  } catch (e) {
+    msg.innerHTML = `<div class="err">${esc(e.message)}</div>`;
+  } finally {
+    btn.disabled = false;
+  }
+};
+
 $("fbSave").onclick = async () => {
   const key = $("fbKey").value.trim();
   const msg = $("fbMsg"), btn = $("fbSave");
@@ -1377,6 +1453,7 @@ $("fbSave").onclick = async () => {
     msg.innerHTML = `<div class="ok-box">Saved. Gemini stays your main provider; `
       + `OpenAI takes over if a run hits the daily cap.</div>`;
     $("fbKey").value = "";
+    await checkSetup();     // the switcher can now offer OpenAI
     refreshUsage();
   } catch (e) {
     msg.innerHTML = `<div class="err">${esc(e.message)}</div>`;

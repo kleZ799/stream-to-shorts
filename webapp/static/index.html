@@ -282,6 +282,10 @@
         <option value="openai">OpenAI</option>
       </select>
     </label>
+    <div class="switcher" id="switcher" hidden>
+      <span id="switchNote"></span>
+      <button class="btn ghost sm" id="switchBtn"></button>
+    </div>
     <label class="fld">
       <span>Replace API key</span>
       <input type="password" id="setKey2" placeholder="Paste a new key">
@@ -292,12 +296,7 @@
 
   <div class="d-sec">
     <h3>Today's API use</h3>
-    <div class="meter" id="usageMeter" hidden>
-      <div class="meter-top">
-        <span id="meterLabel"></span><b id="meterCount"></b>
-      </div>
-      <div class="meter-track"><div class="meter-fill" id="meterFill"></div></div>
-    </div>
+    <div id="meters"></div>
     <div class="kv" id="usageInfo"></div>
     <p class="hint" id="usageHint"></p>
     <label class="fld">
@@ -306,6 +305,12 @@
     </label>
     <button class="btn ghost" id="fbSave">Save backup key</button>
     <div id="fbMsg"></div>
+    <label class="fld">
+      <span>Daily request cap for OpenAI &mdash; optional, for the meter</span>
+      <input type="number" id="capOpenai" min="1" step="1" placeholder="e.g. 100">
+    </label>
+    <button class="btn ghost" id="capSave">Save cap</button>
+    <div id="capMsg"></div>
   </div>
 </aside>
 

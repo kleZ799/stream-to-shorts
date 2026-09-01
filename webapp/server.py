@@ -91,6 +91,9 @@ class SettingsRequest(BaseModel):
     # gets saved as the thing that takes over when Gemini's day runs out,
     # rather than as a switch away from Gemini.
     as_fallback: bool = False
+    # A self-imposed daily request cap, so a provider that bills instead of
+    # cutting you off still has a line to draw a meter against. "" clears it.
+    daily_limit: Optional[str] = None
 
 
 @app.get("/api/settings")
@@ -112,6 +115,20 @@ async def get_settings() -> dict:
         "source": "environment" if from_env else "settings file",
         "config_path": str(user_config.config_path()),
         "ffmpeg": shutil.which("ffmpeg") is not None,
+        # Which providers are already set up, so the UI can offer a switch
+        # rather than asking for a key that is on disk already.
+        "keys": {
+            "gemini": bool(user_config.get("GEMINI_API_KEY")),
+            "openai": bool(user_config.get("OPENAI_API_KEY")),
+        },
+        "daily_limits": {
+            "gemini": user_config.get("GEMINI_DAILY_LIMIT"),
+            "openai": user_config.get("OPENAI_DAILY_LIMIT"),
+        },
+        # An env var (or a .env beside the source) outranks the settings file
+        # by design. Saying so is the difference between a switch that looks
+        # broken and one that explains itself.
+        "provider_pinned": bool(os.getenv("LLM_PROVIDER", "").strip()),
     }
 
 
@@ -127,6 +144,18 @@ async def get_usage() -> dict:
     snap["model"] = current_model(provider)
     # Whether a spent Gemini day would actually be survivable.
     snap["fallback_ready"] = bool(user_config.get("OPENAI_API_KEY"))
+
+    # A provider that is set up but unused today still has a budget worth
+    # showing — the whole point of a meter is to read it *before* spending.
+    for name, key in (("gemini", "GEMINI_API_KEY"), ("openai", "OPENAI_API_KEY")):
+        if name in snap["providers"] or not user_config.get(key):
+            continue
+        model = current_model(name)
+        limit = usage.daily_limit(name, model)
+        snap["providers"][name] = {
+            "used": 0, "model": model, "limit": limit or None,
+            "remaining": limit or None, "exhausted": False,
+        }
     return snap
 
 
@@ -139,13 +168,23 @@ async def set_settings(req: SettingsRequest) -> dict:
         raise HTTPException(400, "Provider must be 'gemini' or 'openai'.")
 
     key = (req.api_key or "").strip()
-    if not key:
+    key_name = "GEMINI_API_KEY" if provider == "gemini" else "OPENAI_API_KEY"
+    # Switching to a provider whose key is already stored must not demand the
+    # key again — retyping a secret you already saved is not a security step,
+    # it is just a reason to keep the wrong provider selected.
+    if not key and not user_config.get(key_name):
         raise HTTPException(400, "Paste an API key first.")
 
     values = {} if req.as_fallback else {"LLM_PROVIDER": provider}
-    values["GEMINI_API_KEY" if provider == "gemini" else "OPENAI_API_KEY"] = key
+    if key:
+        values[key_name] = key
     if req.model:
         values["GEMINI_MODEL" if provider == "gemini" else "OPENAI_MODEL"] = req.model.strip()
+    if req.daily_limit is not None:
+        cap = req.daily_limit.strip()
+        if cap and not cap.isdigit():
+            raise HTTPException(400, "The daily cap must be a whole number of requests.")
+        values["GEMINI_DAILY_LIMIT" if provider == "gemini" else "OPENAI_DAILY_LIMIT"] = cap
 
     path = user_config.save(values)
     return {"saved": True, "config_path": str(path),
