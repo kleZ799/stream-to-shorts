@@ -192,6 +192,32 @@ function fmtSpan(sec) {
   return h ? `${h}h ${m}m` : `${m}m`;
 }
 
+// A long video costs roughly one request per 20 minutes plus two, so ten left
+// is a comfortable run and two is not. Sitting above the render button, this
+// is the last thing seen before committing to a download and a transcription.
+function drawBudget(g, u) {
+  const el = $("budget");
+  if (!g || !g.limit) { el.classList.add("hidden"); return; }
+
+  const frac = Math.min(1, g.used / g.limit);
+  const fill = $("budgetFill");
+  fill.style.width = `${Math.round(frac * 100)}%`;
+  fill.classList.toggle("warn", frac >= 0.7 && frac < 1);
+  fill.classList.toggle("spent", frac >= 1);
+
+  el.classList.remove("hidden", "low", "out");
+  if (g.exhausted) {
+    el.classList.add("out");
+    $("budgetText").textContent = u.fallback_ready
+      ? `Gemini spent for today — this run will continue on OpenAI`
+      : `Gemini spent for today — back in ${fmtSpan(u.resets_in_seconds)}`;
+  } else {
+    if (frac >= 0.7) el.classList.add("low");
+    $("budgetText").textContent =
+      `${g.remaining} of ${g.limit} API requests left today`;
+  }
+}
+
 // The free tier caps requests per *day*, so the number that matters is how
 // much of today is left — shown before a run, not discovered three chunks in.
 async function refreshUsage() {
@@ -214,6 +240,8 @@ async function refreshUsage() {
       $("meterLabel").textContent = g.exhausted ? "Gemini — spent" : "Gemini requests";
       $("meterCount").textContent = `${g.used} / ${g.limit}`;
     }
+
+    drawBudget(g, u);
 
     const rows = [];
     if (g && !capped) rows.push(`<div><span>Gemini</span><b>${g.used} used</b></div>`);
@@ -651,6 +679,9 @@ async function finish(s) {
   $("go").disabled = false;
   $("go").textContent = "Generate shorts";
   setTimeout(() => loadbar(null), 600);
+  // The run just spent requests — including the failed ones, which is exactly
+  // when knowing what is left matters most.
+  refreshUsage();
 
   const made = (s.clips || []).filter((c) => c.url).length;
   if (s.error && !made) {
