@@ -53,8 +53,17 @@ def _free_port() -> int:
         return int(s.getsockname()[1])
 
 
+# A cold start pays for imports of faster-whisper, ctranslate2, cv2 and the
+# Google client, read off disk while the virus scanner reads them too. Sixty
+# seconds was enough warm and not enough cold, which showed up as a taskbar
+# click that spun and then did nothing at all. The engine thread is watched
+# separately, so a genuine failure still reports in seconds -- this ceiling
+# only has to outlast a slow machine having a bad morning.
+STARTUP_TIMEOUT_SECONDS = 300.0
+
+
 def _wait_until_up(port: int, engine: threading.Thread,
-                   timeout: float = 60.0) -> bool:
+                   timeout: float = STARTUP_TIMEOUT_SECONDS) -> bool:
     """Block until the server accepts connections, or give up.
 
     Watches the engine thread too: if it died on an import or a bind error
