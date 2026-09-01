@@ -2,55 +2,73 @@
 
 # 🎮 Stream → Shorts
 
-**Turn a 3-hour gaming VOD into five vertical clips worth posting. Locally. For free.**
+### Turn a 3-hour gaming VOD into five vertical clips worth posting.
 
-[![Python](https://img.shields.io/badge/python-3.10+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
-[![faster-whisper](https://img.shields.io/badge/faster--whisper-local-000000?style=for-the-badge)](https://github.com/SYSTRAN/faster-whisper)
-[![Gemini](https://img.shields.io/badge/Gemini-free_tier-8E75B2?style=for-the-badge&logo=googlegemini&logoColor=white)](https://aistudio.google.com/apikey)
-[![ffmpeg](https://img.shields.io/badge/ffmpeg-007808?style=for-the-badge&logo=ffmpeg&logoColor=white)](https://ffmpeg.org)
+Runs entirely on your PC. No subscription, no per-clip credits, no watermark,
+and your VODs never leave your machine.
+
+[![Download](https://img.shields.io/badge/⬇_Download_for_Windows-229_MB-ff0033?style=for-the-badge)](https://github.com/kleZ799/stream-to-shorts/releases/latest/download/StreamToShorts.exe)
 [![License](https://img.shields.io/badge/license-MIT-green?style=for-the-badge)](LICENSE)
 
-No subscription. No per-clip credits. No watermark. No uploading your VODs to someone else's server.
+**No Python. No ffmpeg. Nothing to install.** Double-click and go.
 
-### [⬇ Download StreamToShorts.exe](https://github.com/kleZ799/stream-to-shorts/releases/latest/download/StreamToShorts.exe)
-
-Windows · 229 MB · no Python, no ffmpeg, nothing to install
+<img src="assets/screenshots/01-create.png" alt="The create screen: a layout prompt on the left, a live 9:16 preview on the right" width="880">
 
 </div>
 
 ---
 
-## Just want the app?
+## What it does
 
-Download [**StreamToShorts.exe**](https://github.com/kleZ799/stream-to-shorts/releases/latest/download/StreamToShorts.exe) and double-click it. There is no installer and nothing to set up first.
+### Describe the layout. Don't configure it.
 
-One thing to know on first run: **Windows will warn you.** The exe isn't code-signed, so SmartScreen shows *"Windows protected your PC"*. Click **More info → Run anyway**.
+Type *"webcam at the top, vertical for Shorts, 5 clips"* and the frame updates as
+you type. Want one exact moment instead? Say *"cut 14:45 to 15:30"* and it skips
+the ranking entirely. The chips are shortcuts for phrases it already understands.
 
-ffmpeg is bundled, so there is nothing else to install. First launch takes a few seconds while the single file unpacks itself.
+### It watches the whole VOD so you don't have to
 
-The app asks for a [free Gemini API key](https://aistudio.google.com/apikey) the first time you open it, and stores it at `%APPDATA%\StreamToShorts\settings.json`. Clips go to `%USERPROFILE%\Videos\StreamToShorts` unless you change that in Settings.
+Transcribes the audio locally with faster-whisper, then ranks every moment for
+what actually travels: hooks, revelations, opinion bombs, story peaks. You get
+told which stage it's on, because a three-hour VOD is not a two-second wait.
 
-The rest of this README is for running from source, which you only need if you want to change how it works.
+<img src="assets/screenshots/02-progress.png" alt="A job mid-run, transcribing at 42%, with the log open" width="880">
+
+### Clips come back ranked
+
+Each card carries its score and the exact span it was cut from.
+
+<img src="assets/screenshots/03-clips.png" alt="Four finished clips in a grid, each with a score and timestamps" width="880">
+
+### Fix any cut without re-running anything
+
+Click a clip and it opens in a player. Move the in and out points, mute it, save
+it, or throw it away. Trimming re-cuts straight from the downloaded source, so
+the span can **grow** as well as shrink — something you cannot do by trimming the
+rendered file.
+
+<img src="assets/screenshots/04-player-trim.png" alt="The clip player with the trim panel open, showing in and out handles" width="880">
 
 ---
 
-## What it looks like
+## Get it
 
-Describe the layout in plain English and watch the frame update as you type. The chips are shortcuts for the phrases it understands.
+[**⬇ Download StreamToShorts.exe**](https://github.com/kleZ799/stream-to-shorts/releases/latest/download/StreamToShorts.exe) — 229 MB, Windows, self-contained.
 
-![The create screen, with a layout prompt and the live 9:16 preview](assets/screenshots/01-create.png)
+Double-click it. On first run it asks for a [free Gemini API key](https://aistudio.google.com/apikey), which is stored only on your machine.
 
-It tells you which stage it's on and what it's doing, because transcribing a three-hour VOD is not a two-second wait.
+<details>
+<summary>First-run details</summary>
 
-![A job mid-run, transcribing at 42%, with the log open](assets/screenshots/02-progress.png)
+- **Windows will warn you.** The exe isn't code-signed, so SmartScreen shows *"Windows protected your PC"*. Click **More info → Run anyway**.
+- **First launch is slow.** It's a single file that unpacks itself each time.
+- **Where things go.** The key lives at `%APPDATA%\StreamToShorts\settings.json`; clips go to `%USERPROFILE%\Videos\StreamToShorts`, changeable in Settings.
+- **ffmpeg is bundled**, so there is nothing else to install.
 
-Finished clips come back as cards, ranked, with the span each one was cut from.
+</details>
 
-![Four finished clips in a grid, each with its score and timestamps](assets/screenshots/03-clips.png)
-
-Click one and it opens in a player. Move the in and out points, mute it, save it, or throw it away — no re-run. Trimming re-cuts from the downloaded source, so the span can grow as well as shrink.
-
-![The clip player with the trim panel open, showing in and out handles](assets/screenshots/04-player-trim.png)
+Everything below is for running from source, which you only need if you want to
+change how it works.
 
 ---
 
