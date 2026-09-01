@@ -886,7 +886,9 @@ async function writeSeoForRun(runId, btn, force) {
     if (at > -1 && clips[at]) renderSeo();
     toast("Titles, descriptions and tags are ready — copy them from any clip.");
   } catch (e) {
-    toast(e.message || "Could not write the metadata.");
+    // Flagged as an error so it reads as one and stays up longer — this is
+    // the message that explains why the titles did not change.
+    toast(e.message || "Could not write the metadata.", true);
   } finally {
     if (btn) { btn.disabled = false; btn.innerHTML = label; }
   }
