@@ -1,7 +1,7 @@
 """Local LLM backend — OpenAI or Gemini, selected by LLM_PROVIDER."""
 import re
 import time
-from typing import Optional
+from typing import Dict, List, Optional, Tuple
 
 from .. import usage
 from ..config import (
@@ -10,6 +10,50 @@ from ..config import (
     require_gemini_key,
     require_openai_key,
 )
+
+# Models whose name says they are not for ranking text.
+_NON_TEXT = ("image", "tts", "embed", "robotics", "computer-use", "transcribe",
+             "omni", "audio", "veo", "imagen")
+
+# ListModels is a different quota from generateContent, but it is still a
+# network round trip on a settings load, so it is cached for the process.
+_model_cache: Tuple[float, List[str]] = (0.0, [])
+_MODEL_CACHE_SECONDS = 600
+
+
+def list_gemini_models(force: bool = False) -> List[str]:
+    """Text models this key can actually call, newest-looking first.
+
+    Asked of the API rather than hardcoded, because Google retires models:
+    `gemini-2.0-flash` was in a hand-written list here and had already been
+    withdrawn, so offering it produced a 404 mid-run. A list that comes from
+    the account itself cannot drift out of date.
+    """
+    global _model_cache
+    age, cached = _model_cache
+    if cached and not force and (time.time() - age) < _MODEL_CACHE_SECONDS:
+        return cached
+
+    try:
+        from google import genai  # type: ignore
+        client = genai.Client(api_key=require_gemini_key())
+        names = []
+        for m in client.models.list():
+            name = str(m.name or "").replace("models/", "")
+            if not name.startswith("gemini"):
+                continue
+            if "generateContent" not in (m.supported_actions or []):
+                continue
+            if any(bad in name for bad in _NON_TEXT):
+                continue
+            names.append(name)
+    except Exception as e:
+        print(f"[llm] could not list models ({e}); using the built-in list", flush=True)
+        return []
+
+    names.sort()
+    _model_cache = (time.time(), names)
+    return names
 
 
 class DailyQuotaExceeded(RuntimeError):

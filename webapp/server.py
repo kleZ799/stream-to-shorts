@@ -96,6 +96,27 @@ class SettingsRequest(BaseModel):
     daily_limit: Optional[str] = None
 
 
+def _gemini_model_options() -> list:
+    """Models to offer, asked of the API and annotated with known limits.
+
+    The available list has to come from the account: a hardcoded one went
+    stale and offered a retired model, which 404'd in the middle of a run.
+    The free-tier numbers stay local because the API does not report them —
+    so a model we have no number for is offered with none, rather than a
+    guess dressed up as fact.
+    """
+    from shorts_generator import usage
+    from shorts_generator.local.llm import list_gemini_models
+
+    known = usage.FREE_TIER_DAILY_LIMITS
+    names = list_gemini_models() or list(known)
+    opts = [{"value": n, "daily_free": known.get(n)} for n in names]
+    # Ones with a confirmed allowance first, biggest first — that is the
+    # number someone picking a model is actually shopping for.
+    opts.sort(key=lambda o: (o["daily_free"] is None, -(o["daily_free"] or 0), o["value"]))
+    return opts
+
+
 @app.get("/api/settings")
 async def get_settings() -> dict:
     """What the UI needs to decide whether to show first-run setup.
@@ -133,11 +154,7 @@ async def get_settings() -> dict:
         # day on one, hundreds on another — and picking the wrong one is the
         # difference between a working afternoon and a paid API. Offered here
         # so the choice is made with the number in view.
-        "gemini_models": [
-            {"value": name, "daily_free": limit}
-            for name, limit in sorted(usage.FREE_TIER_DAILY_LIMITS.items(),
-                                      key=lambda kv: -kv[1])
-        ],
+        "gemini_models": _gemini_model_options(),
         "model_pinned": bool(os.getenv("GEMINI_MODEL", "").strip()),
     }
 

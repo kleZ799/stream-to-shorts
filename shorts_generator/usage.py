@@ -21,13 +21,14 @@ from typing import Dict, Optional
 
 from . import user_config
 
-# Free-tier requests per day, by model. Anyone on a paid plan has no daily cap
+# Free-tier requests per day, for models we have a confirmed number for.
+# NOT the list of available models -- Google retires them, so that list is
+# asked of the API (see llm.list_gemini_models). This only annotates it. Anyone on a paid plan has no daily cap
 # worth modelling, so DAILY_LIMIT_UNKNOWN means "don't pretend to know".
 DAILY_LIMIT_UNKNOWN = 0
 FREE_TIER_DAILY_LIMITS = {
     "gemini-2.5-flash-lite": 1000,
     "gemini-2.5-flash": 250,
-    "gemini-2.0-flash": 200,
     "gemini-2.5-pro": 100,
     "gemini-3.6-flash": 20,
 }

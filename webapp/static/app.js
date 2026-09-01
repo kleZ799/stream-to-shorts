@@ -203,8 +203,12 @@ function drawModels(d) {
   if (d.provider !== "gemini" || !models.length) { fld.hidden = true; hint.textContent = ""; return; }
 
   fld.hidden = false;
-  sel.innerHTML = models.map((m) =>
-    `<option value="${esc(m.value)}">${esc(m.value)} — ${m.daily_free}/day free</option>`).join("");
+  // A model we have no confirmed number for says so, rather than showing a
+  // guess with the same confidence as a checked one.
+  sel.innerHTML = models.map((m) => {
+    const note = m.daily_free ? `${m.daily_free}/day free` : "limit unknown";
+    return `<option value="${esc(m.value)}">${esc(m.value)} — ${note}</option>`;
+  }).join("");
   if (models.some((m) => m.value === d.model)) sel.value = d.model;
   else sel.insertAdjacentHTML("afterbegin",
     `<option value="${esc(d.model)}" selected>${esc(d.model)} — limit unknown</option>`);
@@ -215,8 +219,9 @@ function drawModels(d) {
     return;
   }
   sel.disabled = false;
-  hint.textContent = "Google's published free-tier limits. They change — the app "
-    + "trusts a real quota error over this number.";
+  hint.textContent = "This list comes from your key, so retired models can't appear. "
+    + "Daily limits are the published free-tier numbers where known — the app "
+    + "trusts a real quota error over them.";
   sel.onchange = () => saveModel(sel.value);
 }
 
