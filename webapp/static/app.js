@@ -143,6 +143,7 @@ const spy = new IntersectionObserver((entries) => {
 function openDrawer() {
   body.classList.add("drawer-on");
   loadLocations();
+  loadCleanup();
 }
 $("settingsBtn").onclick = openDrawer;
 $("gSettings").onclick = openDrawer;
@@ -240,6 +241,63 @@ $("locSave").onclick = async () => {
   } finally {
     $("locSave").disabled = false;
   }
+};
+
+let cleanup = null;
+
+function humanBytes(n) {
+  if (!n) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let i = 0, v = n;
+  while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+  return `${i === 0 ? v : v.toFixed(v < 10 ? 1 : 0)} ${units[i]}`;
+}
+
+async function loadCleanup() {
+  const info = $("cleanInfo"), btn = $("cleanBtn");
+  try {
+    cleanup = await api("/api/cleanup");
+  } catch (_) {
+    info.innerHTML = `<div><span>Couldn't check the folder</span></div>`;
+    btn.disabled = true;
+    return;
+  }
+  if (!cleanup.count) {
+    info.innerHTML = `<div><span>Nothing to clear</span><b>0 B</b></div>`;
+    btn.disabled = true;
+    return;
+  }
+  const partials = cleanup.items.filter(i => i.kind === "partial").length;
+  const sources = cleanup.count - partials;
+  const rows = [`<div><span>Source videos</span><b>${sources}</b></div>`];
+  if (partials) rows.push(`<div><span>Unfinished downloads</span><b>${partials}</b></div>`);
+  rows.push(`<div><span>Frees up</span><b>${humanBytes(cleanup.bytes)}</b></div>`);
+  info.innerHTML = rows.join("");
+  btn.disabled = false;
+}
+
+$("cleanBtn").onclick = () => {
+  if (!cleanup || !cleanup.count) return;
+  ask(
+    "Clear space?",
+    `${cleanup.count} file${cleanup.count === 1 ? "" : "s"} will be deleted, freeing ${humanBytes(cleanup.bytes)}. `
+      + `Your clips stay where they are. Making more shorts from the same video will download it again.`,
+    async () => {
+      $("cleanBtn").disabled = true;
+      $("cleanMsg").innerHTML = "";
+      try {
+        const r = await api("/api/cleanup", json("POST", {}));
+        toast(`Freed ${humanBytes(r.freed)}`);
+        if (r.failed.length) {
+          $("cleanMsg").innerHTML = `<div class="err">${esc(r.failed.join("; "))}</div>`;
+        }
+      } catch (e) {
+        $("cleanMsg").innerHTML = `<div class="err">${esc(e.message)}</div>`;
+      } finally {
+        await loadCleanup();
+      }
+    }
+  );
 };
 
 async function openFolder() {

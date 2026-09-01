@@ -169,6 +169,78 @@ async def set_location(req: LocationRequest) -> dict:
     }
 
 
+# Downloaded sources are the only big thing the app leaves behind: a two-hour
+# stream is several GB, and it is dead weight once the clips are rendered.
+_CLEANABLE_MEDIA = {".mp4", ".mkv", ".webm", ".mov", ".m4a", ".wav", ".aac"}
+_CLEANABLE_PARTIAL = {".part", ".ytdl", ".temp"}
+
+
+def _cleanup_scan() -> list:
+    """Reclaimable files in the source folder.
+
+    Deliberately narrow: the downloaded videos and half-finished downloads,
+    nothing else. Rendered clips live in a different folder and are the whole
+    point of the app. Transcripts stay too — a .srt is a few hundred KB and
+    saves re-transcribing hours of audio on the next run.
+    """
+    from shorts_generator import user_config
+
+    src = user_config.source_dir().resolve()
+    items = []
+    for f in sorted(src.iterdir()):
+        if not f.is_file():
+            continue
+        name = f.name.lower()
+        if f.suffix.lower() in _CLEANABLE_PARTIAL or name.endswith(".mp4.part"):
+            kind = "partial"
+        elif f.suffix.lower() in _CLEANABLE_MEDIA:
+            kind = "source"
+        else:
+            continue
+        try:
+            size = f.stat().st_size
+        except OSError:
+            continue
+        items.append({"name": f.name, "path": str(f), "bytes": size, "kind": kind})
+    return items
+
+
+@app.get("/api/cleanup")
+async def cleanup_scan() -> dict:
+    """What a cleanup would remove, so the UI can show it before asking."""
+    from shorts_generator import user_config
+
+    items = await asyncio.to_thread(_cleanup_scan)
+    return {
+        "items": items,
+        "count": len(items),
+        "bytes": sum(i["bytes"] for i in items),
+        "folder": str(user_config.source_dir()),
+    }
+
+
+@app.post("/api/cleanup")
+async def cleanup_run() -> dict:
+    """Delete those files. Refuses while a job is in flight, since the source
+    it is reading from is exactly what would be removed."""
+    busy = [j for j in STORE.list() if j["status"] in ("queued", "running")]
+    if busy:
+        raise HTTPException(409, "A job is still running — wait for it to finish, then clear space.")
+
+    items = await asyncio.to_thread(_cleanup_scan)
+    freed = 0
+    removed, failed = [], []
+    for it in items:
+        try:
+            Path(it["path"]).unlink()
+        except OSError as e:
+            failed.append(f"{it['name']}: {e.strerror or e}")
+            continue
+        freed += it["bytes"]
+        removed.append(it["name"])
+    return {"freed": freed, "removed": removed, "failed": failed, "count": len(removed)}
+
+
 @app.post("/api/reveal")
 async def reveal(req: RevealRequest) -> dict:
     """Open a folder in the OS file manager.
