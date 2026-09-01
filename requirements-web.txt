@@ -4,3 +4,6 @@
 fastapi>=0.110
 uvicorn[standard]>=0.27
 python-multipart>=0.0.9
+
+# Native app window. Without it desktop.py falls back to your browser.
+pywebview>=5.0

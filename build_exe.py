@@ -58,6 +58,14 @@ def main() -> int:
         # The UI files are read from disk at runtime, so they must ship.
         "--add-data", f"{ROOT / 'webapp' / 'static'}{sep}webapp/static",
 
+        # The native window. pywebview picks its backend at runtime, so
+        # PyInstaller sees none of it without being told.
+        "--hidden-import", "webview",
+        "--hidden-import", "webview.platforms.edgechromium",
+        "--hidden-import", "webview.platforms.winforms",
+        "--hidden-import", "clr",
+        "--collect-all", "webview",
+
         # Imported lazily inside functions, so PyInstaller can't see them.
         "--hidden-import", "faster_whisper",
         "--hidden-import", "ctranslate2",
