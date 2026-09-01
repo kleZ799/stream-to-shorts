@@ -4,7 +4,28 @@ __pycache__/
 .venv/
 venv/
 output/
+# rendered clips and the job.json manifest written beside them
+shorts/
+
+# Nothing the app produces from a real video ever belongs in here. These are
+# the formats a download, a render, or a test run of the exe leaves behind —
+# any one of them would put a personal video in the repo and make it heavy.
 *.mp4
+*.mkv
+*.webm
+*.mov
+*.avi
+*.m4v
+*.ts
+*.flv
+*.m4a
+*.wav
+*.aac
+*.mp3
+*.srt
+*.vtt
+*.part
+*.ytdl
 .DS_Store
 smoketest/
 run*.log
@@ -24,6 +45,10 @@ build/
 dist/
 *.spec
 bin/
+# a stray copy of the 229 MB build outside dist/ would bloat this repo forever
+*.exe
+*.dll
+*.pyd
 
 # local tooling — not part of the project
 # (.claude/skills is tracked on purpose, so only the launch config is ignored)
