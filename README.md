@@ -221,7 +221,7 @@ Copy `.env.example` to `.env` and fill it in:
 ```ini
 LLM_PROVIDER=gemini
 GEMINI_API_KEY=your_key_here
-GEMINI_MODEL=gemini-2.5-flash
+GEMINI_MODEL=gemini-3.6-flash
 LOCAL_WHISPER_MODEL=base
 LOCAL_WHISPER_DEVICE=auto
 LOCAL_OUTPUT_DIR=output
