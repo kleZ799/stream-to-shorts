@@ -271,8 +271,16 @@ def generate_seo(
     video_meta: Optional[Dict] = None,
     source: str = "",
     llm_fn: Optional[LLMFn] = None,
+    errors: Optional[List[str]] = None,
 ) -> List[Dict]:
-    """Upload metadata for each highlight, in the order given (best first)."""
+    """Upload metadata for each highlight, in the order given (best first).
+
+    Falling back to filename-derived titles is the right behaviour mid-render —
+    a run must not die because the metadata step failed. But the caller has to
+    be able to tell the difference, so anything that went wrong is appended to
+    `errors` rather than only printed. Each returned entry also carries
+    `generated`, saying whether a model actually wrote it.
+    """
     if not highlights:
         return []
 
@@ -302,6 +310,8 @@ def generate_seo(
     except Exception as e:
         print(f"[seo] could not generate metadata ({e}); falling back to hook-line titles",
               flush=True)
+        if errors is not None:
+            errors.append(str(e))
 
     out = []
     for i, h in enumerate(highlights, 1):

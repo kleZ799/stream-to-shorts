@@ -625,11 +625,30 @@ def regenerate_seo(store: "JobStore", job: Job, force: bool = False) -> int:
             "transcript_text": _clip_words(job, c),
         })
 
+    errors: List[str] = []
     written = generate_seo(highlights, video_meta=job.video_meta,
-                           source=job.source, llm_fn=call_local_llm)
+                           source=job.source, llm_fn=call_local_llm,
+                           errors=errors)
+
+    # Only keep what a model actually wrote, or fill a clip that had nothing at
+    # all. Writing a fallback over metadata that was generated properly would
+    # quietly downgrade a good title into a filename — worst on the "Rewrite"
+    # button, whose whole job is to improve what is already there.
+    kept = 0
     for clip, seo in zip(targets, written):
-        store.set_seo(job, clip["file"], seo)
-    return len(written)
+        if seo.get("generated") or not clip.get("seo"):
+            store.set_seo(job, clip["file"], seo)
+        if seo.get("generated"):
+            kept += 1
+
+    if not kept:
+        # Returning a count of fallbacks read as success all the way to the UI,
+        # which then reported titles were "ready" when nothing had changed.
+        raise RuntimeError(
+            errors[0] if errors else
+            "The metadata writer returned nothing usable for these clips."
+        )
+    return kept
 
 
 class _JobStdout(io.TextIOBase):
