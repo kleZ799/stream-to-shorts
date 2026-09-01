@@ -211,6 +211,41 @@ def list_channel_videos(url: str, limit: int = 12) -> List[Dict]:
     return videos
 
 
+def fetch_video_meta(video_url: str) -> Dict:
+    """Title, channel, description and tags for a URL, without downloading it.
+
+    Feeds the SEO writer: a clip's own transcript says what was said, and this
+    says what the video is *about* — the channel, the topic, the words the
+    uploader already ranks for. Metadata only, and best-effort: a failure here
+    costs a little context, never the run.
+    """
+    if _resolve_local_path(video_url):
+        return {}
+
+    try:
+        yt_dlp = _import_ytdlp()
+        opts = {"quiet": True, "no_warnings": True, "skip_download": True}
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(video_url, download=False) or {}
+    except Exception as e:
+        print(f"[download/local] could not read video details ({e})", flush=True)
+        return {}
+
+    meta = {
+        "title": info.get("title") or "",
+        "uploader": info.get("uploader") or info.get("channel") or "",
+        "description": (info.get("description") or "")[:2000],
+        "tags": [str(t) for t in (info.get("tags") or [])][:30],
+        "categories": [str(c) for c in (info.get("categories") or [])][:5],
+        "duration": info.get("duration"),
+        "webpage_url": info.get("webpage_url") or video_url,
+    }
+    if meta["title"]:
+        print(f"[download/local] source: {meta['title']}"
+              + (f" — {meta['uploader']}" if meta["uploader"] else ""), flush=True)
+    return meta
+
+
 def download_youtube_local(video_url: str, fmt: str = "720", out_dir: Optional[str] = None) -> str:
     """Download a remote URL or return a local file path unchanged."""
     local_path = _resolve_local_path(video_url)
