@@ -34,6 +34,26 @@ The rest of this README is for running from source, which you only need if you w
 
 ---
 
+## What it looks like
+
+Describe the layout in plain English and watch the frame update as you type. The chips are shortcuts for the phrases it understands.
+
+![The create screen, with a layout prompt and the live 9:16 preview](assets/screenshots/01-create.png)
+
+It tells you which stage it's on and what it's doing, because transcribing a three-hour VOD is not a two-second wait.
+
+![A job mid-run, transcribing at 42%, with the log open](assets/screenshots/02-progress.png)
+
+Finished clips come back as cards, ranked, with the span each one was cut from.
+
+![Four finished clips in a grid, each with its score and timestamps](assets/screenshots/03-clips.png)
+
+Click one and it opens in a player. Move the in and out points, mute it, save it, or throw it away — no re-run. Trimming re-cuts from the downloaded source, so the span can grow as well as shrink.
+
+![The clip player with the trim panel open, showing in and out handles](assets/screenshots/04-player-trim.png)
+
+---
+
 ## The problem this solves
 
 I stream story games and post Shorts. The math of that is brutal: a 35-minute session has maybe five clippable moments in it, and finding them means scrubbing the whole VOD twice.
