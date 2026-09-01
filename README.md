@@ -2,10 +2,13 @@
 
 # 🎮 Stream → Shorts
 
-### Turn a 3-hour gaming VOD into five vertical clips worth posting.
+### Turn long videos into vertical Shorts — on your own PC
 
-Runs entirely on your PC. No subscription, no per-clip credits, no watermark,
-and your VODs never leave your machine.
+An AI clip generator for stream VODs, podcasts, and any long video: it finds the
+moments worth posting and cuts them to 9:16 for **Shorts, Reels and TikTok**.
+
+No subscription, no per-clip credits, no watermark, and nothing is uploaded —
+transcription and ranking both run locally.
 
 [![Download](https://img.shields.io/badge/⬇_Download_for_Windows-229_MB-ff0033?style=for-the-badge)](https://github.com/kleZ799/stream-to-shorts/releases/latest/download/StreamToShorts.exe)
 [![License](https://img.shields.io/badge/license-MIT-green?style=for-the-badge)](LICENSE)
