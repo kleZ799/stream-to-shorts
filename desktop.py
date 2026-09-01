@@ -47,6 +47,26 @@ def _prepare_environment() -> None:
         os.environ.setdefault("LOCAL_OUTPUT_DIR", "output")
 
 
+def _alert(message: str, *, error: bool = True) -> None:
+    """Tell the user something, even with no console to tell them through.
+
+    The packaged build is windowed, so stderr goes nowhere a user will ever
+    look. Anything worth printing on the way out is worth a dialog box.
+    """
+    print(message, file=sys.stderr if error else sys.stdout, flush=True)
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+
+        MB_ICONERROR, MB_ICONINFORMATION = 0x10, 0x40
+        ctypes.windll.user32.MessageBoxW(
+            None, message, APP_NAME, MB_ICONERROR if error else MB_ICONINFORMATION
+        )
+    except Exception:
+        pass    # a missing dialog must not become the reason we can't exit
+
+
 def _free_port() -> int:
     with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as s:
         s.bind(("127.0.0.1", 0))
@@ -114,10 +134,11 @@ def main() -> int:
 
     if not _wait_until_up(port, engine):
         if _engine_error is not None:
-            print(f"The engine could not start: {_engine_error}", file=sys.stderr)
+            _alert(f"{APP_NAME} could not start its engine:\n\n{_engine_error}")
         else:
-            print("The engine did not start in time. Check the log above.",
-                  file=sys.stderr)
+            _alert(f"{APP_NAME}'s engine did not start in time.\n\n"
+                   f"Try launching it again — the first start after a reboot "
+                   f"is the slowest.")
         return 1
 
     try:
