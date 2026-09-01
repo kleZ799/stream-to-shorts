@@ -22,7 +22,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from shorts_generator.layout_spec import ASPECT_PRESETS, LayoutSpec, parse_layout_prompt
-from .jobs import STORE
+from .jobs import STORE, regenerate_seo
 
 STATIC_DIR = Path(__file__).parent / "static"
 UPLOAD_DIR = Path("webapp_uploads")
@@ -241,6 +241,37 @@ async def cleanup_run() -> dict:
     return {"freed": freed, "removed": removed, "failed": failed, "count": len(removed)}
 
 
+def _open_in_file_manager(target: Path) -> None:
+    """Show `target` in the OS file manager.
+
+    A file gets *selected* in its folder rather than opened — the point is to
+    land on it, not to launch it in a video player.
+    """
+    import subprocess
+    import sys as _sys
+
+    is_file = target.is_file()
+    if os.name == "nt":
+        if is_file:
+            # explorer's /select, takes one glued argument and rejects the
+            # quoting subprocess applies to a list, so hand it a command line.
+            # A Windows filename can never contain a quote, so this can't be
+            # broken out of — but check anyway, since it is a shell-ish call.
+            if '"' in str(target):
+                raise ValueError("That filename can't be shown safely.")
+            subprocess.run(f'explorer /select,"{target}"')   # noqa: S603 - local desktop app
+        else:
+            os.startfile(str(target))       # noqa: S606 - local desktop app
+    elif _sys.platform == "darwin":
+        subprocess.run(["open", "-R", str(target)] if is_file else ["open", str(target)],
+                       check=True)
+    else:
+        # No portable "select this file" on Linux; the containing folder is
+        # the next best thing.
+        subprocess.run(["xdg-open", str(target if not is_file else target.parent)],
+                       check=True)
+
+
 @app.post("/api/reveal")
 async def reveal(req: RevealRequest) -> dict:
     """Open a folder in the OS file manager.
@@ -248,8 +279,6 @@ async def reveal(req: RevealRequest) -> dict:
     Only paths inside the configured save location are allowed — this runs a
     local command, so it must never be steerable to an arbitrary path.
     """
-    import subprocess
-    import sys as _sys
     from shorts_generator import user_config
 
     target = Path(req.path or "").expanduser()
@@ -265,15 +294,44 @@ async def reveal(req: RevealRequest) -> dict:
         raise HTTPException(403, "That folder is outside your save location.")
 
     try:
-        if os.name == "nt":
-            os.startfile(str(target))       # noqa: S606 - local desktop app
-        elif _sys.platform == "darwin":
-            subprocess.run(["open", str(target)], check=True)
-        else:
-            subprocess.run(["xdg-open", str(target)], check=True)
+        await asyncio.to_thread(_open_in_file_manager, target)
     except Exception as e:
         raise HTTPException(500, f"Could not open the folder: {e}")
     return {"opened": str(target)}
+
+
+class ShowRequest(BaseModel):
+    file: Optional[str] = None
+
+
+@app.post("/api/jobs/{job_id}/reveal")
+async def reveal_clip(job_id: str, req: ShowRequest) -> dict:
+    """Show one clip (or its run's folder) in the file manager.
+
+    Addressed by job and filename rather than by a path from the browser: the
+    server already knows where a job's clips live, so nothing the page sends
+    can point this at somewhere else on the disk. It also means a run made
+    before the save location moved still opens where its files actually are.
+    """
+    job = _job_or_404(job_id)
+
+    if req.file:
+        safe = os.path.basename(req.file)
+        if STORE.clip(job, safe) is None:
+            raise HTTPException(404, "No such clip")
+        target = _clip_path(job, safe)
+        if not target.exists():
+            raise HTTPException(404, "That clip's file is missing — it may have been moved.")
+    else:
+        target = Path(job.out_dir)
+        if not target.exists():
+            raise HTTPException(404, "That run's folder is gone.")
+
+    try:
+        await asyncio.to_thread(_open_in_file_manager, target)
+    except Exception as e:
+        raise HTTPException(500, f"Could not show that file: {e}")
+    return {"opened": str(target), "folder": str(target.parent if req.file else target)}
 
 
 @app.post("/api/open-upload")
@@ -360,6 +418,50 @@ async def create_job(req: JobRequest) -> dict:
 @app.get("/api/jobs")
 async def list_jobs() -> dict:
     return {"jobs": STORE.list()}
+
+
+@app.get("/api/library")
+async def library() -> dict:
+    """Every clip this app has ever made that is still on disk.
+
+    Rescans the folder first, so clips rendered by an earlier session — or by
+    a copy of the app that was closed and reopened — come back rather than
+    disappearing with the process that made them.
+    """
+    await asyncio.to_thread(STORE.restore)
+    runs = []
+    for snap in STORE.list():
+        clips = [c for c in snap["clips"] if c.get("url")]
+        if not clips:
+            continue
+        runs.append({
+            "id": snap["id"],
+            "created_at": snap["created_at"],
+            "source": snap["source"],
+            "source_title": snap["source_title"],
+            "shorts_dir": snap["shorts_dir"],
+            "restored": snap["restored"],
+            "clips": clips,
+        })
+    return {"runs": runs, "count": sum(len(r["clips"]) for r in runs)}
+
+
+@app.post("/api/jobs/{job_id}/seo")
+async def write_seo(job_id: str, force: bool = False) -> dict:
+    """Write (or rewrite) the upload metadata for a job's clips.
+
+    Runs on demand rather than at listing time: it costs an LLM call, and for
+    clips old enough to have no transcript on record it costs a short
+    transcription too.
+    """
+    job = _job_or_404(job_id)
+    if not job.clips:
+        raise HTTPException(409, "This run has no clips to write metadata for.")
+    try:
+        written = await asyncio.to_thread(regenerate_seo, STORE, job, force)
+    except Exception as e:
+        raise HTTPException(500, f"Could not write the metadata: {e}")
+    return {"written": written, "clips": job.clips}
 
 
 @app.get("/api/jobs/{job_id}")
