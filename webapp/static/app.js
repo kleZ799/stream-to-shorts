@@ -187,6 +187,46 @@ async function checkSetup() {
   } catch (_) { /* an offline settings check is not worth blocking startup */ }
 }
 
+function fmtSpan(sec) {
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60);
+  return h ? `${h}h ${m}m` : `${m}m`;
+}
+
+// The free tier caps requests per *day*, so the number that matters is how
+// much of today is left — shown before a run, not discovered three chunks in.
+async function refreshUsage() {
+  try {
+    const u = await api("/api/usage");
+    const g = u.providers.gemini || null;
+    const o = u.providers.openai || null;
+
+    const rows = [];
+    if (g) {
+      const val = g.limit
+        ? `${g.used} of ${g.limit} used${g.exhausted ? " — spent" : ` · ${g.remaining} left`}`
+        : `${g.used} used`;
+      rows.push(`<div><span>Gemini</span><b>${esc(val)}</b></div>`);
+    }
+    if (o) rows.push(`<div><span>OpenAI</span><b>${o.used} used</b></div>`);
+    if (!rows.length) rows.push(`<div><span>Requests</span><b>none yet today</b></div>`);
+    rows.push(`<div><span>Resets in</span><b>${fmtSpan(u.resets_in_seconds)}</b></div>`);
+    $("usageInfo").innerHTML = rows.join("");
+
+    let hint;
+    if (g && g.exhausted && u.fallback_ready) {
+      hint = "Gemini is out for today — runs will continue on OpenAI automatically.";
+    } else if (g && g.exhausted) {
+      hint = "Gemini is out for today. Add an OpenAI key below to keep going, "
+           + "or come back after the reset — a part-finished run picks up where it stopped.";
+    } else if (u.fallback_ready) {
+      hint = "If Gemini runs out mid-run, OpenAI takes over automatically.";
+    } else {
+      hint = "A long video costs roughly one request per 20 minutes, plus two.";
+    }
+    $("usageHint").textContent = hint;
+  } catch (_) { /* the app still works without a usage panel */ }
+}
+
 function keyLinkFor(provider) {
   const gem = provider === "gemini";
   $("keyLink").textContent = gem ? "Get a free Gemini key →" : "Get an OpenAI key →";
@@ -1258,7 +1298,33 @@ $("pMini").onclick = () => {
 
 keyLinkFor($("setProvider").value);
 checkSetup();
+refreshUsage();
 loadLocations();
 refreshPreview();
+
+// Deliberately not saveKey(): that switches the active provider, and this key
+// is meant to sit behind Gemini rather than replace it.
+$("fbSave").onclick = async () => {
+  const key = $("fbKey").value.trim();
+  const msg = $("fbMsg"), btn = $("fbSave");
+  if (!key) { msg.innerHTML = `<div class="err">Paste an OpenAI key first.</div>`; return; }
+  btn.disabled = true;
+  const label = btn.textContent;
+  btn.textContent = "Saving…";
+  try {
+    await api("/api/settings", json("POST", {
+      provider: "openai", api_key: key, as_fallback: true,
+    }));
+    msg.innerHTML = `<div class="ok-box">Saved. Gemini stays your main provider; `
+      + `OpenAI takes over if a run hits the daily cap.</div>`;
+    $("fbKey").value = "";
+    refreshUsage();
+  } catch (e) {
+    msg.innerHTML = `<div class="err">${esc(e.message)}</div>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = label;
+  }
+};
 // Clips made in earlier sessions are still on disk — show them straight away.
 loadLibrary();
