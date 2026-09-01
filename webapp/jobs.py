@@ -416,10 +416,14 @@ class JobStore:
         from shorts_generator.local.downloader import (
             download_youtube_local, fetch_video_meta,
         )
-        from shorts_generator.local.llm import call_local_llm
+        from shorts_generator.local.llm import call_local_llm, reset_fallback
         from shorts_generator.local.transcriber import transcribe_local
         from shorts_generator.render import render_highlights
         from shorts_generator.seo import attach_seo
+
+        # A previous run may have fallen back to OpenAI. Start this one on the
+        # provider the user actually chose — its quota may well have reset.
+        reset_fallback()
 
         with self._lock:
             job.status = "running"
@@ -478,8 +482,13 @@ class JobStore:
                 )
 
             self._update(job, stage="rank", message=_STAGE_LABELS["rank"])
+            # Beside the video, next to its .srt, so resuming works the same
+            # way transcript reuse already does: point at the same source and
+            # the work you already paid for is still there.
+            checkpoint = Path(source_path).with_suffix(".highlights.json")
             result = get_highlights(transcript, num_clips=job.spec.num_clips,
-                                    llm_fn=call_local_llm)
+                                    llm_fn=call_local_llm,
+                                    checkpoint_path=checkpoint)
             all_highlights = result.get("highlights", [])
             if not all_highlights:
                 raise RuntimeError("The ranker found no usable moments in this video.")
