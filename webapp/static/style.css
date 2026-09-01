@@ -803,6 +803,30 @@ label.fld > span a:hover { text-decoration: underline; }
   word-break: break-word;
 }
 
+/* ============================ runs ============================ */
+/* One group per render, newest first. The heading says which video the clips
+   under it came from, so a library built up over weeks stays readable. */
+.runs { display: flex; flex-direction: column; gap: 26px; }
+
+.run-head {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding-bottom: 10px;
+  margin-bottom: 14px;
+  border-bottom: 1px solid var(--line);
+}
+.run-id h3 {
+  font: 500 15px/1.35 inherit;
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.run-id span { display: block; color: var(--text-3); font-size: 12px; margin-top: 3px; }
+.run-actions { display: flex; gap: 8px; margin-left: auto; }
+
 /* ============================ clip grid ============================ */
 .clips {
   display: grid;
@@ -863,19 +887,24 @@ label.fld > span a:hover { text-decoration: underline; }
   font: 600 11px/1.3 inherit;
   font-variant-numeric: tabular-nums;
 }
+/* Position in the ranking, which is the whole point of the ordering: #1 is
+   the one to post first. The score rides along in a quieter weight. */
 .clip .rank {
   position: absolute;
   left: 6px; top: 6px;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
   background: rgba(0, 0, 0, .72);
   backdrop-filter: blur(6px);
   border-radius: var(--pill);
   padding: 3px 9px;
   font: 700 11px/1.3 inherit;
-  color: var(--warn);
+  color: #fff;
 }
+.clip .rank i { font: 600 10.5px/1.3 inherit; color: var(--warn); font-style: normal; }
+.clip:first-child .rank { background: linear-gradient(120deg, var(--red), #7a2bff); }
+.clip .flag .need { color: var(--warn); }
 .clip .flag {
   position: absolute;
   left: 6px; bottom: 6px;
@@ -898,7 +927,83 @@ label.fld > span a:hover { text-decoration: underline; }
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
-.clip .cm { color: var(--text-2); font-size: 12px; margin-top: 3px; }
+.clip .cm {
+  color: var(--text-2);
+  font-size: 12px;
+  margin-top: 3px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* Copy straight off the card — the common case is grabbing a title and
+   pasting it into YouTube, without opening the clip at all. */
+.clip .cq { display: flex; gap: 6px; margin-top: 8px; }
+.qbtn {
+  border: 1px solid var(--line);
+  background: var(--raised-2);
+  color: var(--text-2);
+  border-radius: var(--pill);
+  padding: 4px 10px;
+  font: 500 11.5px/1.3 inherit;
+  cursor: pointer;
+  transition: background var(--fast), color var(--fast), border-color var(--fast);
+}
+.qbtn:hover { background: var(--hover); color: var(--text); border-color: #4a4a4a; }
+
+/* ============================ upload metadata ============================ */
+.seo {
+  width: 380px;
+  max-height: 82vh;
+  overflow-y: auto;
+  background: var(--raised);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  padding: 18px;
+  align-self: center;
+  display: none;
+  animation: slidein .3s var(--ease);
+}
+.player.seo-on .seo { display: block; }
+@media (max-width: 900px) { .seo { width: min(390px, 92vw); margin: 0 auto; } }
+
+.sf { margin-bottom: 14px; }
+.sf-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.sf-top > span { font-size: 11.5px; color: var(--text-2); }
+.sf-count { font-size: 11px; color: var(--text-3); font-style: normal; margin-left: auto; }
+.sf-count.over { color: var(--err); }
+.sf-top .qbtn { margin-left: auto; }
+.sf-count + .qbtn { margin-left: 0; }
+
+.sf input,
+.sf textarea {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  color: var(--text);
+  padding: 9px 11px;
+  font: 400 13px/1.55 inherit;
+  resize: vertical;
+}
+.sf input:focus,
+.sf textarea:focus { outline: none; border-color: var(--blue); }
+
+.seo-empty { color: var(--text-2); font-size: 13px; line-height: 1.6; margin-bottom: 16px; }
+.seo-why {
+  color: var(--text-3);
+  font-size: 12px;
+  line-height: 1.6;
+  margin: 2px 0 14px;
+}
+.seo-why b { color: var(--text-2); }
+.seo-why.warnish { color: var(--warn); }
 
 /* ============================ settings drawer ============================ */
 .scrim {

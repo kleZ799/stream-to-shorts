@@ -181,7 +181,7 @@
             </div>
           </div>
           <div class="dims" id="dims">1080 &times; 1920</div>
-          <div class="summary" id="summary">9:16 &middot; webcam on top at 42% height &middot; gameplay below</div>
+          <div class="summary" id="summary">10 clips &middot; 9:16 &middot; webcam on top at 42% height &middot; gameplay below</div>
           <ul class="notes" id="notes"></ul>
           <div id="exact"></div>
           <div id="warn"></div>
@@ -212,8 +212,9 @@
           <button class="btn yt sm" id="uploadBtn"><svg><use href="#i-yt"/></svg>Upload to YouTube</button>
         </div>
       </div>
-      <p class="lead">Click a clip to play it, move its in and out points, mute it, save it or throw it away.</p>
-      <div class="clips" id="clips"></div>
+      <p class="lead">Ranked best first — #1 is the one to post today. Click any clip to
+        play it, trim it, or copy the title, description and tags to upload it with.</p>
+      <div class="runs" id="clips"></div>
     </section>
 
     <!-- help -->
@@ -298,11 +299,31 @@
         <button class="rbtn" id="pPlay" title="Play / pause (Space)"><svg><use href="#i-play"/></svg><span>Play</span></button>
         <button class="rbtn" id="pMute" title="Mute (M)"><svg><use href="#i-vol"/></svg><span>Sound</span></button>
         <button class="rbtn" id="pTrimBtn" title="Trim (T)"><svg><use href="#i-scissors"/></svg><span>Trim</span></button>
+        <button class="rbtn" id="pSeoBtn" title="Title, description and tags (B)"><svg><use href="#i-spark"/></svg><span>Boost</span></button>
         <button class="rbtn" id="pSave" title="Save to your folder"><svg><use href="#i-save"/></svg><span>Save</span></button>
         <a class="rbtn" id="pDownload" download title="Download"><svg><use href="#i-download"/></svg><span>Download</span></a>
+        <button class="rbtn" id="pShow" title="Show this file on your PC (F)"><svg><use href="#i-folder"/></svg><span>Show file</span></button>
         <button class="rbtn danger" id="pDelete" title="Delete"><svg><use href="#i-trash"/></svg><span>Delete</span></button>
         <button class="rbtn" id="pMini" title="Shrink to mini player"><svg><use href="#i-expand"/></svg><span>Mini</span></button>
       </div>
+    </div>
+
+    <!-- upload metadata -->
+    <div class="seo" id="seo">
+      <div class="t-head">
+        <h3><svg><use href="#i-spark"/></svg>Upload this Short</h3>
+        <button class="ibtn sm" id="seoClose"><svg><use href="#i-close"/></svg></button>
+      </div>
+
+      <div class="seo-body" id="seoBody"></div>
+
+      <div class="t-actions">
+        <button class="btn ghost" id="seoRedo">Rewrite</button>
+        <button class="btn primary" id="seoCopyAll">Copy everything</button>
+      </div>
+      <p class="hint">Written from what is actually said in this clip, so the title
+        never promises something the Short doesn't deliver.</p>
+      <div id="seoMsg"></div>
     </div>
 
     <!-- trim panel -->

@@ -14,7 +14,7 @@ const EXAMPLES = [
   "gameplay only, no webcam",
   "follow my face",
   "zoom in tighter on my face",
-  "3 clips",
+  "just 5 clips",
   "cut 14:45 to 15:30",
 ];
 
@@ -29,10 +29,15 @@ let source = null;       // { source, name }
 let specTimer = null;
 let es = null;           // EventSource
 let jobId = null;
-let clips = [];          // whatever the server last told us about this job
+let runs = [];           // every run still on disk, newest first
+let clips = [];          // those runs' clips, flattened in display order
 let cur = -1;            // index of the clip in the player
 let trim = null;         // { lo, hi, start, end }
 let confirmFn = null;
+
+// A clip knows which run it came from, so the player's buttons keep working
+// on clips made in an earlier session rather than only the newest one.
+const jobOf = (c) => (c && c.job_id) || jobId;
 
 // ---------------------------------------------------------------- helpers
 
@@ -300,17 +305,18 @@ $("cleanBtn").onclick = () => {
   );
 };
 
-async function openFolder() {
+async function openFolder(path) {
   try {
     if (!locations) await loadLocations();
-    await api("/api/reveal", json("POST", { path: locations.shorts }));
+    await api("/api/reveal",
+              json("POST", { path: typeof path === "string" && path ? path : locations.shorts }));
   } catch (e) {
     toast(e.message, true);
   }
 }
-$("folderBtn").onclick = openFolder;
-$("folderBtn2").onclick = openFolder;
-$("gFolder").onclick = openFolder;
+$("folderBtn").onclick = () => openFolder();
+$("folderBtn2").onclick = () => openFolder();
+$("gFolder").onclick = () => openFolder();
 
 async function openYouTubeUpload() {
   try {
@@ -516,8 +522,7 @@ async function run() {
   if (!source) return;
   $("go").disabled = true;
   $("go").textContent = "Working…";
-  $("results").classList.add("hidden");
-  $("clips").innerHTML = "";
+  // The clips already on disk stay on screen while the new run works.
   $("log").textContent = "";
   $("progress").classList.remove("hidden");
   $("progress").scrollIntoView({ behavior: "smooth", block: "center" });
@@ -539,6 +544,7 @@ async function run() {
   }
 
   jobId = job.id;
+  finished = null;
   if (es) es.close();
   es = new EventSource(`/api/jobs/${job.id}/stream`);
   es.onmessage = (ev) => onUpdate(JSON.parse(ev.data));
@@ -571,28 +577,99 @@ function onUpdate(s) {
   if (s.status === "done" || s.status === "error") finish(s);
 }
 
-function finish(s) {
+let finished = null;
+
+async function finish(s) {
+  // The stream's last message and the fallback read can both land here.
+  if (finished === s.id) return;
+  finished = s.id;
   if (es) { es.close(); es = null; }
   $("go").disabled = false;
   $("go").textContent = "Generate shorts";
   setTimeout(() => loadbar(null), 600);
 
-  if (s.error && !(s.clips || []).some((c) => c.url)) {
+  const made = (s.clips || []).filter((c) => c.url).length;
+  if (s.error && !made) {
     showErr(s.error);
     return;
   }
 
-  clips = (s.clips || []).filter((c) => c.url);
-  renderClips();
-  if (!clips.length) return;
+  // Reload the whole library rather than showing this run alone, so the new
+  // clips land at the top of everything already made.
+  await loadLibrary();
+  if (!made) return;
 
   $("results").scrollIntoView({ behavior: "smooth", block: "start" });
-  // The whole point of the wait: show the first clip playing, straight away.
-  setTimeout(() => openMini(0), 700);
-  toast(`${clips.length} clip${clips.length > 1 ? "s" : ""} ready — click one to trim or save it.`);
+  // The whole point of the wait: show the best clip playing, straight away.
+  const first = clips.findIndex((c) => c.job_id === s.id);
+  setTimeout(() => openMini(first > -1 ? first : 0), 700);
+  toast(`${made} clip${made > 1 ? "s" : ""} ready, ranked best first — open one for its title and tags.`);
 }
 
 // ---------------------------------------------------------------- results
+
+// Everything ever rendered that is still on disk — not just this session's run.
+async function loadLibrary() {
+  try {
+    const d = await api("/api/library");
+    runs = d.runs || [];
+  } catch (_) {
+    runs = [];
+  }
+  clips = [];
+  runs.forEach((r) => r.clips.forEach((c) => {
+    c.job_id = c.job_id || r.id;
+    // The full path on disk, for the "Show file" tooltip.
+    if (r.shorts_dir && c.file) {
+      c.path = r.shorts_dir + (r.shorts_dir.includes("\\") ? "\\" : "/") + c.file;
+    }
+    clips.push(c);
+  }));
+  renderClips();
+  return clips.length;
+}
+
+function whenMade(ts) {
+  if (!ts) return "";
+  const d = new Date(ts * 1000);
+  const days = Math.floor((Date.now() - d.getTime()) / 86400000);
+  if (days <= 0) return "today";
+  if (days === 1) return "yesterday";
+  if (days < 7) return `${days} days ago`;
+  return d.toLocaleDateString();
+}
+
+function clipCard(c, i) {
+  const seo = c.seo || null;
+  const title = (seo && seo.title) || c.title || "Untitled";
+  const sub = (seo && seo.hook_text) || c.hook_sentence
+    || (c.start_time != null ? `${clock(c.start_time)} → ${clock(c.end_time)}` : "");
+  const rank = c.rank || c.index;
+  return `
+    <div class="clip" data-i="${i}" style="animation-delay:${Math.min(i, 12) * 45}ms">
+      <div class="thumb">
+        <video src="${esc(c.url)}#t=0.5" preload="metadata" muted playsinline data-i="${i}"></video>
+        <div class="veil"><span class="pbtn"><svg><use href="#i-play"/></svg></span></div>
+        <span class="rank">${rank ? `#${esc(rank)}` : ""}${
+          c.score != null ? `<i>★ ${esc(c.score)}</i>` : ""}</span>
+        <span class="dur">${c.duration != null ? clock(c.duration) : ""}</span>
+        <div class="flag">
+          ${c.edited ? `<span>trimmed</span>` : ""}
+          ${c.muted ? `<span>muted</span>` : ""}
+          ${c.saved_to ? `<span>saved</span>` : ""}
+          ${!seo ? `<span class="need">no title yet</span>` : ""}
+        </div>
+      </div>
+      <div class="ct">${esc(title)}</div>
+      <div class="cm">${esc(sub)}</div>
+      <div class="cq">
+        ${seo ? `<button class="qbtn" data-copy="title" data-i="${i}">Copy title</button>
+        <button class="qbtn" data-copy="tags" data-i="${i}">Copy tags</button>` : ""}
+        <button class="qbtn" data-show="${i}"
+          title="${esc(c.path || c.file || "")}">Show file</button>
+      </div>
+    </div>`;
+}
 
 function renderClips() {
   const count = clips.length;
@@ -600,26 +677,122 @@ function renderClips() {
   $("gCount").classList.toggle("hidden", !count);
   $("results").classList.toggle("hidden", !count);
 
-  $("clips").innerHTML = clips.map((c, i) => `
-    <div class="clip" data-i="${i}" style="animation-delay:${i * 55}ms">
-      <div class="thumb">
-        <video src="${esc(c.url)}#t=0.5" preload="metadata" muted playsinline></video>
-        <div class="veil"><span class="pbtn"><svg><use href="#i-play"/></svg></span></div>
-        ${c.score != null ? `<span class="rank">★ ${esc(c.score)}</span>` : ""}
-        <span class="dur">${clock(c.duration)}</span>
-        <div class="flag">
-          ${c.edited ? `<span>trimmed</span>` : ""}
-          ${c.muted ? `<span>muted</span>` : ""}
-          ${c.saved_to ? `<span>saved</span>` : ""}
+  let i = 0;
+  $("clips").innerHTML = runs.map((r) => {
+    const cards = r.clips.map((c) => clipCard(c, i++)).join("");
+    const missing = r.clips.filter((c) => !c.seo).length;
+    return `
+      <section class="run">
+        <div class="run-head">
+          <div class="run-id">
+            <h3>${esc(r.source_title || "Clips from an earlier run")}</h3>
+            <span>${r.clips.length} clip${r.clips.length > 1 ? "s" : ""}
+              · ${esc(whenMade(r.created_at))}</span>
+          </div>
+          <div class="run-actions">
+            <button class="btn ghost sm" data-seorun="${esc(r.id)}"
+              data-missing="${missing}">
+              <svg><use href="#i-spark"/></svg>${missing ? "Write titles &amp; tags" : "Rewrite titles"}</button>
+            <button class="btn ghost sm" data-openrun="${esc(r.id)}"
+              title="${esc(r.shorts_dir || "")}">
+              <svg><use href="#i-folder"/></svg>Folder</button>
+          </div>
         </div>
-      </div>
-      <div class="ct">${esc(c.title || "Untitled")}</div>
-      <div class="cm">${clock(c.start_time)} → ${clock(c.end_time)}</div>
-    </div>`).join("");
+        <div class="clips">${cards}</div>
+      </section>`;
+  }).join("");
 
-  [...$("clips").children].forEach((el) => {
+  $("clips").querySelectorAll(".clip").forEach((el) => {
     el.onclick = () => openPlayer(+el.dataset.i);
   });
+  // Clips restored from an older folder have no recorded length; the file
+  // itself knows, so fill it in as soon as the browser reads the header.
+  $("clips").querySelectorAll(".thumb video").forEach((v) => {
+    v.addEventListener("loadedmetadata", () => {
+      const c = clips[+v.dataset.i];
+      if (!c || c.duration != null || !isFinite(v.duration)) return;
+      c.duration = Math.round(v.duration * 10) / 10;
+      const tag = v.closest(".thumb").querySelector(".dur");
+      if (tag) tag.textContent = clock(c.duration);
+    }, { once: true });
+  });
+  $("clips").querySelectorAll("[data-copy]").forEach((b) => {
+    b.onclick = (e) => {
+      e.stopPropagation();
+      const c = clips[+b.dataset.i];
+      const seo = (c && c.seo) || {};
+      const what = b.dataset.copy;
+      copy(what === "title" ? seo.title : (seo.tags || []).join(", "),
+           what === "title" ? "Title copied" : "Tags copied");
+    };
+  });
+  $("clips").querySelectorAll("[data-show]").forEach((b) => {
+    b.onclick = (e) => { e.stopPropagation(); showClipFile(clips[+b.dataset.show]); };
+  });
+  $("clips").querySelectorAll("[data-seorun]").forEach((b) => {
+    b.onclick = () => writeSeoForRun(b.dataset.seorun, b, +b.dataset.missing === 0);
+  });
+  $("clips").querySelectorAll("[data-openrun]").forEach((b) => {
+    b.onclick = async () => {
+      try {
+        await api(`/api/jobs/${encodeURIComponent(b.dataset.openrun)}/reveal`,
+                  json("POST", {}));
+      } catch (e) {
+        toast(e.message, true);
+      }
+    };
+  });
+}
+
+// Open the file manager with the clip's own file selected, so "where is this
+// on my PC" is one click rather than a hunt through folders.
+async function showClipFile(c) {
+  if (!c) return;
+  try {
+    const d = await api(`/api/jobs/${encodeURIComponent(jobOf(c))}/reveal`,
+                        json("POST", { file: c.file }));
+    toast(d.opened || "Opened in your files.");
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function copy(text, okMsg) {
+  const value = String(text ?? "").trim();
+  if (!value) { toast("Nothing to copy yet."); return false; }
+  try {
+    await navigator.clipboard.writeText(value);
+  } catch (_) {
+    // Clipboard API needs a secure context; a hidden textarea always works.
+    const ta = document.createElement("textarea");
+    ta.value = value;
+    ta.style.cssText = "position:fixed;opacity:0";
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand("copy"); } catch (_) { /* nothing left to try */ }
+    ta.remove();
+  }
+  toast(okMsg || "Copied");
+  return true;
+}
+
+// Writing metadata costs an LLM call, and for clips with no transcript on
+// record a short transcription too — so it runs on request, not on load.
+async function writeSeoForRun(runId, btn, force) {
+  const label = btn ? btn.innerHTML : "";
+  if (btn) { btn.disabled = true; btn.textContent = "Writing…"; }
+  try {
+    await api(`/api/jobs/${encodeURIComponent(runId)}/seo${force ? "?force=true" : ""}`,
+              { method: "POST" });
+    const at = cur;
+    await loadLibrary();
+    if (at > -1 && clips[at]) renderSeo();
+    toast("Titles, descriptions and tags are ready — copy them from any clip.");
+  } catch (e) {
+    toast(e.message || "Could not write the metadata.");
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = label; }
+  }
 }
 
 // ---------------------------------------------------------------- player
@@ -635,23 +808,27 @@ function openPlayer(i) {
   vid.src = c.url;
   vid.muted = false;
   vid.currentTime = 0;
-  $("pTitle").textContent = c.title || "Untitled";
-  $("pMeta").textContent =
-    `${clock(c.start_time)} → ${clock(c.end_time)} · ${c.duration}s`
-    + (c.score != null ? ` · score ${c.score}` : "")
-    + (c.muted ? " · muted" : "");
+  $("pTitle").textContent = (c.seo && c.seo.title) || c.title || "Untitled";
+  $("pMeta").textContent = [
+    c.rank ? `#${c.rank} of this run` : "",
+    c.start_time != null ? `${clock(c.start_time)} → ${clock(c.end_time)}` : "",
+    c.duration != null ? `${c.duration}s` : "",
+    c.score != null ? `score ${c.score}` : "",
+    c.muted ? "muted" : "",
+  ].filter(Boolean).join(" · ");
   $("pDownload").href = c.url;
   $("pDownload").setAttribute("download", c.file || "short.mp4");
 
   body.classList.add("player-on");
   $("player").classList.remove("trim-on");
+  renderSeo();
   setMuteIcon();
   vid.play().catch(() => {});
 }
 
 function closePlayer() {
   body.classList.remove("player-on");
-  $("player").classList.remove("trim-on");
+  $("player").classList.remove("trim-on", "seo-on");
   vid.pause();
 }
 $("pClose").onclick = closePlayer;
@@ -678,6 +855,7 @@ function setMuteIcon() {
   $("pMute").classList.toggle("on", vid.muted);
 }
 $("pMute").onclick = () => { vid.muted = !vid.muted; setMuteIcon(); };
+$("pShow").onclick = () => showClipFile(clips[cur]);
 
 vid.addEventListener("timeupdate", () => {
   const f = vid.duration ? vid.currentTime / vid.duration : 0;
@@ -715,11 +893,133 @@ document.addEventListener("keydown", (e) => {
   else if (e.key === " ") { e.preventDefault(); togglePlay(); }
   else if (k === "m") { vid.muted = !vid.muted; setMuteIcon(); }
   else if (k === "t") { toggleTrim(); }
+  else if (k === "b") { toggleSeo(); }
+  else if (k === "f") { showClipFile(clips[cur]); }
   else if (e.key === "ArrowRight") { vid.currentTime = Math.min(vid.duration || 0, vid.currentTime + 2); }
   else if (e.key === "ArrowLeft") { vid.currentTime = Math.max(0, vid.currentTime - 2); }
   else if (e.key === "ArrowDown" && cur < clips.length - 1) { openPlayer(cur + 1); }
   else if (e.key === "ArrowUp" && cur > 0) { openPlayer(cur - 1); }
 });
+
+// ---------------------------------------------------------------- upload metadata
+
+function seoField(label, id, value, opts = {}) {
+  const tag = opts.multiline ? "textarea" : "input";
+  const attrs = opts.multiline ? `rows="${opts.rows || 7}"` : `type="text"`;
+  return `
+    <div class="sf">
+      <div class="sf-top">
+        <span>${esc(label)}</span>
+        ${opts.count ? `<i class="sf-count">${String(value || "").length}/${opts.count}</i>` : ""}
+        <button class="qbtn" data-seocopy="${id}">Copy</button>
+      </div>
+      <${tag} id="${id}" ${attrs} spellcheck="false">${
+        opts.multiline ? esc(value || "") : ""}</${tag}>
+    </div>`;
+}
+
+function renderSeo() {
+  const c = clips[cur];
+  const box = $("seoBody");
+  if (!c) { box.innerHTML = ""; return; }
+
+  const seo = c.seo;
+  $("seoRedo").textContent = seo ? "Rewrite" : "Write it now";
+  $("seoCopyAll").disabled = !seo;
+  $("seoMsg").innerHTML = "";
+
+  if (!seo) {
+    box.innerHTML = `
+      <p class="seo-empty">This clip has no upload metadata yet — it was made before
+        the app started writing it, or the write failed.<br><br>
+        <b>Write it now</b> listens to this clip and writes a title, a description,
+        tags and an on-screen hook from what is actually said in it.</p>`;
+    return;
+  }
+
+  box.innerHTML =
+    seoField("Title — paste into YouTube's title box", "sfTitle", seo.title, { count: 100 })
+    + seoField("Description", "sfDesc", seo.description, { multiline: true, rows: 8 })
+    + seoField("Tags — paste into the tags box", "sfTags", (seo.tags || []).join(", "),
+               { multiline: true, rows: 3 })
+    + seoField("On-screen hook for the first 2 seconds", "sfHook", seo.hook_text)
+    + (seo.why_it_works
+        ? `<p class="seo-why"><b>Why this one travels:</b> ${esc(seo.why_it_works)}</p>` : "")
+    + (seo.generated === false
+        ? `<p class="seo-why warnish">Written from the clip's own hook line — the model
+             wasn't reachable. Hit Rewrite to have it written properly.</p>` : "");
+
+  $("sfTitle").value = seo.title || "";
+  $("sfHook").value = seo.hook_text || "";
+
+  box.querySelectorAll("[data-seocopy]").forEach((b) => {
+    b.onclick = () => {
+      const el = $(b.dataset.seocopy);
+      copy(el && el.value, "Copied");
+    };
+  });
+
+  // The fields are editable — tweak a title before copying it — so the count
+  // has to follow along, since 100 characters is a hard YouTube limit.
+  const count = box.querySelector(".sf-count");
+  if (count) {
+    $("sfTitle").addEventListener("input", () => {
+      count.textContent = `${$("sfTitle").value.length}/100`;
+      count.classList.toggle("over", $("sfTitle").value.length > 100);
+    });
+  }
+}
+
+function toggleSeo() {
+  const p = $("player");
+  if (p.classList.contains("seo-on")) { p.classList.remove("seo-on"); return; }
+  if (!clips[cur]) return;
+  p.classList.remove("trim-on");
+  renderSeo();
+  p.classList.add("seo-on");
+}
+$("pSeoBtn").onclick = toggleSeo;
+$("seoClose").onclick = () => $("player").classList.remove("seo-on");
+
+$("seoCopyAll").onclick = () => {
+  const c = clips[cur];
+  if (!c || !c.seo) return;
+  copy([
+    `TITLE\n${$("sfTitle").value}`,
+    `DESCRIPTION\n${$("sfDesc").value}`,
+    `TAGS\n${$("sfTags").value}`,
+    `ON-SCREEN HOOK\n${$("sfHook").value}`,
+  ].join("\n\n"), "Title, description, tags and hook copied.");
+};
+
+$("seoRedo").onclick = async () => {
+  const c = clips[cur];
+  if (!c) return;
+  const btn = $("seoRedo");
+  btn.disabled = true;
+  busy(true, "Writing the title and tags…");
+  $("seoMsg").innerHTML = "";
+  try {
+    const d = await api(
+      `/api/jobs/${encodeURIComponent(jobOf(c))}/seo?force=true`, { method: "POST" });
+    const mine = (d.clips || []).find((x) => x.file === c.file);
+    if (mine) patchClip(cur, { seo: mine.seo });
+    // Everything else in that run was rewritten too — take the new copy.
+    (d.clips || []).forEach((x) => {
+      const local = clips.find((y) => y.file === x.file && jobOf(y) === jobOf(c));
+      if (local && local !== c) local.seo = x.seo;
+    });
+    renderClips();
+    renderSeo();
+    $("pTitle").textContent = (clips[cur].seo && clips[cur].seo.title) || clips[cur].title;
+    toast("Rewritten.");
+  } catch (e) {
+    $("seoMsg").innerHTML = `<div class="err">${esc(e.message)}</div>`;
+  } finally {
+    busy(false);
+    btn.disabled = false;
+  }
+};
 
 // ---------------------------------------------------------------- trim
 
@@ -728,6 +1028,7 @@ function toggleTrim() {
   if (p.classList.contains("trim-on")) { p.classList.remove("trim-on"); return; }
   if (!clips[cur]) return;
   resetTrim();
+  p.classList.remove("seo-on");
   p.classList.add("trim-on");
 }
 $("pTrimBtn").onclick = toggleTrim;
@@ -819,6 +1120,26 @@ function busy(on, text) {
   if (text) $("pBusyText").textContent = text;
 }
 
+// The flat list and the per-run lists hold the same clip objects, so patching
+// one in place keeps the grid and the player telling the same story.
+function patchClip(i, updates) {
+  const c = clips[i];
+  if (!c) return null;
+  Object.assign(c, updates);
+  renderClips();
+  return c;
+}
+
+function dropClip(i) {
+  const c = clips[i];
+  if (!c) return;
+  const run = runs.find((r) => r.id === jobOf(c));
+  if (run) run.clips = run.clips.filter((x) => x !== c);
+  runs = runs.filter((r) => r.clips.length);
+  clips.splice(i, 1);
+  renderClips();
+}
+
 $("tApply").onclick = async () => {
   const c = clips[cur];
   if (!c || !trim) return;
@@ -827,10 +1148,10 @@ $("tApply").onclick = async () => {
   $("tMsg").innerHTML = "";
   vid.pause();
   try {
-    const updated = await api(`/api/jobs/${jobId}/clips/${encodeURIComponent(c.file)}/trim`,
+    const updated = await api(
+      `/api/jobs/${encodeURIComponent(jobOf(c))}/clips/${encodeURIComponent(c.file)}/trim`,
       json("POST", { start: trim.start, end: trim.end, mute: $("tMute").checked }));
-    clips[cur] = updated;
-    renderClips();
+    patchClip(cur, updated);
     // Cache-bust: the new render can reuse a name the browser already holds.
     vid.src = `${updated.url}?v=${Date.now()}`;
     $("pMeta").textContent =
@@ -856,10 +1177,10 @@ $("pSave").onclick = async () => {
   if (!c) return;
   $("pSave").disabled = true;
   try {
-    const d = await api(`/api/jobs/${jobId}/clips/${encodeURIComponent(c.file)}/save`,
-      json("POST", { name: (c.title || "short").slice(0, 60) }));
-    clips[cur] = { ...c, saved_to: d.path };
-    renderClips();
+    const d = await api(
+      `/api/jobs/${encodeURIComponent(jobOf(c))}/clips/${encodeURIComponent(c.file)}/save`,
+      json("POST", { name: ((c.seo && c.seo.title) || c.title || "short").slice(0, 60) }));
+    patchClip(cur, { saved_to: d.path });
     toast(`Saved to ${d.path}`);
   } catch (e) {
     toast(e.message, true);
@@ -874,9 +1195,9 @@ $("pDelete").onclick = () => {
   ask("Delete this clip?", `"${c.title || "Untitled"}" is removed from your PC. This cannot be undone.`,
     async () => {
       try {
-        await api(`/api/jobs/${jobId}/clips/${encodeURIComponent(c.file)}`, { method: "DELETE" });
-        clips.splice(cur, 1);
-        renderClips();
+        await api(`/api/jobs/${encodeURIComponent(jobOf(c))}/clips/${encodeURIComponent(c.file)}`,
+                  { method: "DELETE" });
+        dropClip(cur);
         toast("Clip deleted.");
         if (!clips.length) { closePlayer(); closeMini(); return; }
         openPlayer(Math.min(cur, clips.length - 1));
@@ -896,7 +1217,7 @@ function openMini(i) {
   cur = i;
   mvid.src = c.url;
   mvid.muted = true;          // autoplay only survives if it starts silent
-  $("mTitle").textContent = c.title || "Untitled";
+  $("mTitle").textContent = (c.seo && c.seo.title) || c.title || "Untitled";
   $("mini").classList.remove("hidden");
   setMiniIcons();
   mvid.play().catch(() => {});
@@ -939,3 +1260,5 @@ keyLinkFor($("setProvider").value);
 checkSetup();
 loadLocations();
 refreshPreview();
+// Clips made in earlier sessions are still on disk — show them straight away.
+loadLibrary();
