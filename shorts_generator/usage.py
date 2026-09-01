@@ -113,9 +113,26 @@ def _write(data: Dict) -> None:
 
 
 def _entry(data: Dict, provider: str) -> Dict:
-    return data["providers"].setdefault(
-        provider, {"requests": 0, "exhausted": False, "model": ""}
+    entry = data["providers"].setdefault(
+        provider, {"requests": 0, "exhausted": False, "model": "", "models": {}}
     )
+    entry.setdefault("models", {})
+    # A ledger written before per-model tracking has one flag for the whole
+    # provider. Move it onto the model it was actually about, so an old file
+    # does not keep blocking models it never spent anything on.
+    if entry.get("exhausted") and entry.get("model") and not entry["models"]:
+        entry["models"][entry["model"]] = {
+            "requests": int(entry.get("requests", 0)), "exhausted": True,
+        }
+    return entry
+
+
+def _model_entry(data: Dict, provider: str, model: str) -> Dict:
+    """Per-model counters. Google's daily cap is per project *per model*, so a
+    model that has never been called still has its full allowance — which is
+    the whole reason switching models is a way out of a spent quota."""
+    entry = _entry(data, provider)
+    return entry["models"].setdefault(model or "", {"requests": 0, "exhausted": False})
 
 
 def daily_limit(provider: str, model: str) -> int:
@@ -133,29 +150,40 @@ def daily_limit(provider: str, model: str) -> int:
 
 
 def record(provider: str, model: str = "", count: int = 1) -> None:
-    """Count requests actually sent to a provider."""
+    """Count requests actually sent to a provider, and to that model."""
     with _lock:
         data = _read()
         entry = _entry(data, provider)
         entry["requests"] = int(entry.get("requests", 0)) + count
         if model:
             entry["model"] = model
+        m = _model_entry(data, provider, model)
+        m["requests"] = int(m.get("requests", 0)) + count
         _write(data)
 
 
 def mark_exhausted(provider: str, model: str = "") -> None:
-    """The provider says the day is spent — believe it over the local count."""
+    """This model's day is spent — the provider said so, so believe it.
+
+    Deliberately scoped to the model. Marking the whole provider dead would
+    lock out every other model on the same key, including ones with a far
+    bigger allowance that have not been touched.
+    """
     with _lock:
         data = _read()
         entry = _entry(data, provider)
-        entry["exhausted"] = True
         if model:
             entry["model"] = model
-        limit = daily_limit(provider, model or entry.get("model", ""))
-        if limit and int(entry.get("requests", 0)) < limit:
+        used_model = model or entry.get("model", "")
+        m = _model_entry(data, provider, used_model)
+        m["exhausted"] = True
+
+        limit = daily_limit(provider, used_model)
+        if limit and int(m.get("requests", 0)) < limit:
             # The count was behind reality — quota spent elsewhere, or a
             # request that failed after being counted against us.
-            entry["requests"] = limit
+            m["requests"] = limit
+            entry["requests"] = max(int(entry.get("requests", 0)), limit)
         _write(data)
 
 
@@ -169,27 +197,36 @@ def is_exhausted(provider: str, model: str = "") -> bool:
     is the only thing that stops a run here.
     """
     with _lock:
-        entry = _read()["providers"].get(provider) or {}
-    return bool(entry.get("exhausted"))
+        data = _read()
+        entry = _entry(data, provider)
+        m = entry["models"].get(model or entry.get("model", "")) or {}
+    return bool(m.get("exhausted"))
 
 
-def snapshot() -> Dict:
-    """Everything the UI needs to show today's budget."""
+def snapshot(active_models: Optional[Dict[str, str]] = None) -> Dict:
+    """Everything the UI needs to show today's budget.
+
+    Reported against the model currently selected, not the provider as a
+    whole: the cap belongs to the model, so a meter showing anything else
+    would be answering a question nobody asked.
+    """
+    active_models = active_models or {}
     with _lock:
         data = _read()
-
-    providers = {}
-    for name, entry in data.get("providers", {}).items():
-        model = entry.get("model", "")
-        limit = daily_limit(name, model)
-        used = int(entry.get("requests", 0))
-        providers[name] = {
-            "used": used,
-            "model": model,
-            "limit": limit or None,
-            "remaining": max(0, limit - used) if limit else None,
-            "exhausted": bool(entry.get("exhausted")) or (bool(limit) and used >= limit),
-        }
+        providers = {}
+        for name, entry in data.get("providers", {}).items():
+            _entry(data, name)      # migrate an older file's shape
+            model = active_models.get(name) or entry.get("model", "")
+            m = entry.get("models", {}).get(model) or {}
+            limit = daily_limit(name, model)
+            used = int(m.get("requests", 0))
+            providers[name] = {
+                "used": used,
+                "model": model,
+                "limit": limit or None,
+                "remaining": max(0, limit - used) if limit else None,
+                "exhausted": bool(m.get("exhausted")) or (bool(limit) and used >= limit),
+            }
 
     return {
         "day": data.get("day", quota_day()),

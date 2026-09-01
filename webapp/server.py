@@ -148,7 +148,9 @@ async def get_usage() -> dict:
     from shorts_generator import usage, user_config
     from shorts_generator.config import current_model, current_provider
 
-    snap = usage.snapshot()
+    # Report each provider against the model actually selected for it.
+    snap = usage.snapshot({"gemini": current_model("gemini"),
+                           "openai": current_model("openai")})
     provider = current_provider()
     snap["provider"] = provider
     snap["model"] = current_model(provider)
