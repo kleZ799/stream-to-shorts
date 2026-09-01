@@ -30,6 +30,8 @@ shorts/
 smoketest/
 run*.log
 run*.err
+# stderr captured from a packaged run, same as the .log beside it
+*.err
 result.json
 highlights*.json
 render_*.py
