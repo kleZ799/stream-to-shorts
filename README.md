@@ -72,6 +72,37 @@ change how it works.
 
 ---
 
+## What I built
+
+This began as a fork of [Anil-matcha/AI-Youtube-Shorts-Generator](https://github.com/Anil-matcha/AI-Youtube-Shorts-Generator) (MIT), a
+command-line script that crops talking-head videos. That origin is why GitHub
+lists its authors as contributors here — their commits are genuinely in this
+repo's history, and the licence keeps them credited.
+
+The boundary is easy to draw. **Upstream gave a CLI that face-crops a single
+speaker. Everything that makes this a stream tool, and everything that makes it
+an application, is mine:**
+
+**The application** — none of this existed upstream
+- A **desktop app**: a FastAPI server on a free port, run from a background thread, behind a native WebView2 window. No browser, no address bar, no terminal.
+- A **job runner** — queued work, one CPU-bound job at a time, progress streamed to the browser over SSE.
+- A **clip editor** — re-cut, mute, save or delete a finished clip without re-running the pipeline.
+- The **interface**, built on YouTube's own layout so the audience already knows how to use it.
+- A **single-file Windows build** with ffmpeg bundled, so a non-technical user installs nothing.
+
+**The stream intelligence** — upstream ranks any talking-head video; this one understands streams
+- **`local/gaming_layout.py`** — the entire webcam-over-gameplay renderer: corner-scoped face location, median-stabilised framing, single-pass ffmpeg `vstack`.
+- **`STREAM_VIRALITY_CRITERIA`** — a ranking prompt that separates streamer speech from game narration on one mixed track, and refuses any clip without the streamer in it.
+- **Natural-language layout parsing** — "webcam top, 5 clips" or "cut 14:45 to 15:30" resolves to a render spec, with an exact-span path that skips transcription and ranking entirely.
+
+**The bugs that made it actually work**
+- **Chunk timestamp rebasing** — long videos returned *zero* highlights before this; every chunk past the first had its timestamps clamped away.
+- **High-resolution clipper fixes** — non-contiguous OpenCV slices, Windows file-handle races, downscaled Haar detection.
+- **Gemini support** — provider dispatch, a token budget that survives the model's internal reasoning, and 429 backoff that reads the server's own retry hint.
+- **`opencv-python<5` pin** — 5.x removed `CascadeClassifier`, which the face tracking depends on.
+
+---
+
 ## The problem this solves
 
 I stream story games and post Shorts. The math of that is brutal: a 35-minute session has maybe five clippable moments in it, and finding them means scrubbing the whole VOD twice.
@@ -210,13 +241,7 @@ Clips land in `output/` as `short_01.mp4` … `short_05.mp4`, alongside a `resul
 
 ---
 
-## The app
-
-There's a desktop app for everything above — no flags, no editing constants, no Python.
-
-**Just want to use it?** Grab the latest build from [Releases](https://github.com/kleZ799/stream-to-shorts/releases), unzip, and run `StreamToShorts.exe`. It opens as a normal app window. On first launch it asks for one free API key and remembers it — nothing else to configure.
-
-You'll also need [ffmpeg](https://ffmpeg.org/download.html) on your PATH. The app checks at startup and tells you if it's missing.
+## Using it
 
 **Running from source:**
 
@@ -231,10 +256,13 @@ Prefer it in a browser instead? `python -m webapp` serves it at http://127.0.0.1
 
 ```bash
 pip install -r requirements-web.txt pyinstaller
-python build_exe.py --clean
+python build_exe.py --onefile --clean
 ```
 
-Output lands in `dist/StreamToShorts/` at roughly 390 MB — zip that folder for a release. Drop `ffmpeg.exe` and `ffprobe.exe` into a `./bin` folder before building and they get bundled too, so users need nothing at all.
+Put `ffmpeg.exe` and `ffprobe.exe` in a `./bin` folder first and they get bundled,
+which is how the published build needs nothing installed. That's what makes it
+229 MB; without them it's 153 MB and ffmpeg has to be on the user's PATH. Drop
+`--onefile` for a folder build that starts faster but has to be zipped to share.
 
 **Drop a file or paste a link.** Drag a VOD straight in, or paste a YouTube URL. Paste a *channel* link and it lists the 12 most recent videos as a grid to pick from.
 
@@ -316,6 +344,38 @@ Local mode is what this repo is built around. API mode is inherited from upstrea
 
 ## Under the hood
 
+### The app
+
+```mermaid
+flowchart TB
+    W[WebView2 window<br/>no browser, no address bar] -->|http| S[FastAPI<br/>127.0.0.1, free port]
+    S -->|enqueue, return now| Q[Job queue<br/>one worker thread]
+    Q --> P[pipeline<br/>download - transcribe - rank - render]
+    P -.->|stdout parsed into stages| Q
+    Q -.->|SSE, one event per change| W
+    S --> E[clip editing<br/>trim / mute / save / delete]
+```
+
+**Requests never block on the pipeline.** Transcribing alone outlives any sensible
+HTTP timeout, so `POST /api/jobs` only ever enqueues and returns an id; the
+browser follows along over server-sent events. Jobs run **one at a time on a
+single worker thread** on purpose — Whisper and ffmpeg are both CPU-bound, and
+running two at once makes both slower than running them in sequence.
+
+**Progress is derived, not guessed.** The pipeline already narrates itself to
+stdout, so the runner captures it line by line, maps prefixes like `[transcribe]`
+or `[stack] 2/5` onto stages, and gives each stage a band of the bar. A render
+that reports `3/5` moves the bar to the right place inside the render band
+without the pipeline knowing a UI exists.
+
+**Editing re-cuts from the source, not the render.** Trimming a clip re-runs the
+renderer over the original download with new timestamps, which is why the span
+can grow as well as shrink — trimming the rendered file could only ever remove.
+Clip filenames are resolved against the job's own directory and rejected if they
+escape it.
+
+### The engine
+
 Both modes share one highlight engine. They agree on a single transcript shape:
 
 ```python
@@ -335,21 +395,6 @@ shorts_generator/
     ├── clipper.py         # face-tracking crop (talking-head footage)
     └── gaming_layout.py   # webcam-over-gameplay stack (streams)
 ```
-
----
-
-## What's mine
-
-This started as a fork of [Anil-matcha/AI-Youtube-Shorts-Generator](https://github.com/Anil-matcha/AI-Youtube-Shorts-Generator) (MIT), which handles the talking-head case well. Everything that makes it work on **stream VODs** is new here:
-
-- **`local/gaming_layout.py`** — the entire webcam-over-gameplay renderer: corner-scoped face location, median-stabilised framing, single-pass ffmpeg `vstack`
-- **`STREAM_VIRALITY_CRITERIA`** — a ranking prompt that separates streamer speech from game narration and refuses clips without the streamer in them
-- **Chunk timestamp rebasing** — long videos returned *zero* highlights before this; every chunk past the first had its timestamps clamped away
-- **High-resolution clipper fixes** — non-contiguous OpenCV slices, Windows file-handle races, downscaled Haar detection
-- **Gemini support** — provider dispatch, a token budget that survives the model's internal reasoning, and 429 backoff that reads the server's own retry hint
-- **`opencv-python<5` pin** — 5.x removed `CascadeClassifier`, which the face tracking depends on
-
----
 
 ## Staying in sync with upstream
 
