@@ -94,6 +94,16 @@ class LayoutSpec:
     # Explicit [start, end] spans in seconds. When present, the pipeline cuts
     # exactly these and skips transcription and AI ranking entirely.
     time_ranges: List[List[float]] = field(default_factory=list)
+    # How long each clip should run, as [min, max] seconds. None leaves the
+    # ranker on its own 30-60s default. This is a request to the model, not a
+    # trim: cutting a clip to length afterwards would slice mid-sentence, so
+    # the length has to be part of what it is asked to find.
+    clip_seconds: Optional[List[float]] = None
+    # What KIND of short to look for, in the user's own words — the angle, the
+    # hook, the mood. Handed to the ranker verbatim; the renderer never reads
+    # it. Kept whole rather than parsed, because the value is in the nuance a
+    # keyword pass would throw away.
+    brief: str = ""
     # Human-readable notes about what the parser understood, shown in the UI
     # so the user can see their prompt was actually applied.
     notes: List[str] = field(default_factory=list)
@@ -178,6 +188,9 @@ class LayoutSpec:
             # Say the count up front: it is the number of Shorts the run hands
             # back, and the one setting people most often want to change.
             prefix = f"{self.num_clips} clip{'s' if self.num_clips > 1 else ''} · "
+        if self.clip_seconds:
+            lo, hi = int(self.clip_seconds[0]), int(self.clip_seconds[1])
+            prefix += f"{lo}-{hi}s each · "
         return prefix + self._describe_layout()
 
     def _describe_layout(self) -> str:
@@ -283,12 +296,73 @@ def _fmt_ts(seconds: float) -> str:
     return f"{h}:{m:02d}:{sec:02d}" if h else f"{m}:{sec:02d}"
 
 
+# Clip length, longest-reaching patterns first so "between 20 and 40 seconds"
+# is not eaten by the bare "40 seconds" rule. Each returns (min, max).
+_LENGTH_PATTERNS = [
+    # a range: "20-40s", "between 20 and 40 seconds"
+    (r"\b(?:between\s+)?(\d{1,3})\s*(?:-|–|to|and)\s*(\d{1,3})\s*(?:s\b|secs?\b|seconds?\b)",
+     lambda m: (float(m.group(1)), float(m.group(2)))),
+    # an upper bound: "under 45s", "max 40 seconds", "no longer than 60s"
+    (r"\b(?:under|below|less than|at most|max(?:imum)?|no (?:longer|more) than)\s+"
+     r"(\d{1,3})\s*(?:s\b|secs?\b|seconds?\b)",
+     lambda m: (max(10.0, float(m.group(1)) * 0.6), float(m.group(1)))),
+    # a lower bound: "at least 30 seconds", "over 30s"
+    (r"\b(?:over|above|at least|min(?:imum)?|longer than|more than)\s+"
+     r"(\d{1,3})\s*(?:s\b|secs?\b|seconds?\b)",
+     lambda m: (float(m.group(1)), float(m.group(1)) * 1.5)),
+    # about a minute
+    (r"\b(?:about|around|roughly|~)?\s*(?:a|one)\s+minute\b",
+     lambda m: (50.0, 70.0)),
+    # a flat target: "30 seconds only", "30s clips", "30 second shorts"
+    (r"\b(\d{1,3})\s*(?:s\b|secs?\b|seconds?\b)",
+     lambda m: (float(m.group(1)) * 0.85, float(m.group(1)) * 1.15)),
+]
+
+
+def _parse_clip_length(p: str, spec: LayoutSpec) -> tuple:
+    """Read a requested clip length and strip the phrase that said it.
+
+    Runs before the time-range pass, because "between 20 and 40 seconds" is a
+    length and reads identically to a span. Getting that order wrong turned a
+    request for 20-40s clips into a single exact cut from 0:20 to 0:40, with
+    ranking skipped altogether.
+
+    "cut" is this app's explicit span verb, and a prompt using it wants exact
+    spans — which bypass ranking, making a clip length meaningless. So that
+    word hands the whole phrase back to the range parser.
+    """
+    if re.search(r"\bcut\b", p):
+        return p, False
+
+    for pattern, to_range in _LENGTH_PATTERNS:
+        m = re.search(pattern, p)
+        if not m:
+            continue
+        lo, hi = to_range(m)
+        lo, hi = round(min(lo, hi)), round(max(lo, hi))
+        # Under ~5s there is no clip; over MAX_CLIP_SECONDS the ranker's own
+        # sanitiser would throw the result away, so promising it is a lie.
+        lo = max(5, min(lo, 240))
+        hi = max(lo + 1, min(hi, 240))
+        spec.clip_seconds = [float(lo), float(hi)]
+        spec.notes.append(f"clip length → {lo}-{hi}s")
+        return p[:m.start()] + " " + p[m.end():], True
+    return p, False
+
+
 def _parse_keywords(prompt: str, spec: LayoutSpec) -> set:
     """Apply what we can read directly. Returns the set of fields we resolved."""
     p = prompt.lower()
     resolved = set()
 
-    # Time ranges first: they're stripped from the text so a span like
+    # Clip length first — see _parse_clip_length for why it has to beat the
+    # time-range pass. It also strips the phrase, so "45 second clips" cannot
+    # have its number misread as a clip count.
+    p, had_length = _parse_clip_length(p, spec)
+    if had_length:
+        resolved.add("clip_seconds")
+
+    # Time ranges next: they're stripped from the text so a span like
     # "1:30-2:45" can never be mistaken for an aspect ratio later.
     p, had_ranges = _parse_time_ranges(p, spec)
     if had_ranges:
@@ -423,6 +497,12 @@ def parse_layout_prompt(
     if not prompt or not prompt.strip():
         spec.notes.append("no layout prompt — using defaults")
         return spec.validate()
+
+    # The whole prompt doubles as editorial direction for the ranker. Framing
+    # words in it are harmless noise there, and trying to subtract them would
+    # cost the very nuance ("only the rage moments", "hooks that ask a
+    # question") that makes the brief worth having.
+    spec.brief = prompt.strip()
 
     resolved = _parse_keywords(prompt, spec)
 

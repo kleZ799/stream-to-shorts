@@ -488,7 +488,9 @@ class JobStore:
             checkpoint = Path(source_path).with_suffix(".highlights.json")
             result = get_highlights(transcript, num_clips=job.spec.num_clips,
                                     llm_fn=call_local_llm,
-                                    checkpoint_path=checkpoint)
+                                    checkpoint_path=checkpoint,
+                                    clip_seconds=job.spec.clip_seconds,
+                                    brief=job.spec.brief)
             all_highlights = result.get("highlights", [])
             if not all_highlights:
                 raise RuntimeError("The ranker found no usable moments in this video.")

@@ -84,12 +84,12 @@ HIGHLIGHT_SYSTEM_PROMPT = """You are an elite short-form video editor who has st
 {virality_criteria}
 
 Content type: {content_type} | Density: {density}
-
+{user_brief}
 Your task: identify the most viral-worthy highlights from the transcript.
 
 Rules:
 - Every highlight must open with a strong HOOK — a line that grabs attention within the first 3 seconds
-- Duration: TARGET 30-60 seconds. This is a hard preference — short clips finish, and completion rate is what the algorithm rewards. Go to 20-29s for a perfect standalone one-liner. NEVER exceed 75 seconds
+- {duration_rule}
 - Never cut mid-sentence or mid-thought — each clip must feel complete and self-contained
 - Clips must not overlap significantly with each other
 - Score 0-100 on viral potential (not general quality)
@@ -165,10 +165,63 @@ def _coerce_int(value: object, default: int = 0) -> int:
         return default
 
 
-def _sanitize_highlights(raw_highlights: object, duration: float) -> List[Dict]:
+DEFAULT_DURATION_RULE = (
+    "Duration: TARGET 30-60 seconds. This is a hard preference — short clips "
+    "finish, and completion rate is what the algorithm rewards. Go to 20-29s "
+    "for a perfect standalone one-liner. NEVER exceed 75 seconds"
+)
+
+
+def brief_block(brief: str) -> str:
+    """The user's own description of the short they want, if they gave one.
+
+    Placed above the task and marked as outranking the generic criteria: the
+    house virality list is a good default, but someone who says "only the
+    funny fails" has told us something the list cannot know.
+    """
+    brief = (brief or "").strip()
+    if not brief:
+        return ""
+    return (
+        "\nWHAT THE USER ASKED FOR (outranks the generic criteria above where "
+        f"they disagree):\n\"{brief}\"\n"
+        "Honour any editorial direction in it — the angle, the mood, the kind "
+        "of moment, what the hook should do. Ignore any framing or layout "
+        "instructions (webcam position, aspect ratio, clip count); those are "
+        "handled elsewhere and are not your concern.\n"
+    )
+
+
+def duration_rule(clip_seconds: Optional[List[float]]) -> str:
+    """The length instruction, either the house default or what was asked for."""
+    if not clip_seconds or len(clip_seconds) != 2:
+        return DEFAULT_DURATION_RULE
+    lo, hi = int(clip_seconds[0]), int(clip_seconds[1])
+    return (
+        f"Duration: every clip MUST run between {lo} and {hi} seconds. This is "
+        f"a hard requirement the user asked for by name, not a preference. "
+        f"Prefer a moment that is naturally this long over trimming a longer "
+        f"one, and never end mid-sentence to hit the number"
+    )
+
+
+def _clip_ceiling(clip_seconds: Optional[List[float]]) -> float:
+    """Longest clip to accept back from the model.
+
+    A user who asks for 90-120s clips must not have every one of them thrown
+    away by a limit they never saw, so an explicit request raises the ceiling.
+    """
+    if clip_seconds and len(clip_seconds) == 2:
+        return max(float(MAX_CLIP_SECONDS), float(clip_seconds[1]) * 1.2)
+    return float(MAX_CLIP_SECONDS)
+
+
+def _sanitize_highlights(raw_highlights: object, duration: float,
+                         clip_seconds: Optional[List[float]] = None) -> List[Dict]:
     """Normalize model output into the expected shape; skip invalid entries."""
     if not isinstance(raw_highlights, list):
         return []
+    ceiling = _clip_ceiling(clip_seconds)
 
     max_end = duration if duration > 0 else float("inf")
     cleaned: List[Dict] = []
@@ -181,7 +234,7 @@ def _sanitize_highlights(raw_highlights: object, duration: float) -> List[Dict]:
         if start < 0 or end <= start:
             continue
 
-        if (end - start) > MAX_CLIP_SECONDS:
+        if (end - start) > ceiling:
             continue
 
         if max_end != float("inf"):
@@ -255,6 +308,8 @@ def call_highlight_api(
     num_clips: int,
     is_chunk: bool = False,
     llm_fn: LLMFn = call_muapi_llm,
+    clip_seconds: Optional[List[float]] = None,
+    brief: str = "",
 ) -> Dict:
     # Ask for ~2× the user's target so dedupe has headroom, but cap so the model
     # doesn't have to generate a huge JSON payload (which times out gpt-5-mini).
@@ -266,6 +321,8 @@ def call_highlight_api(
         content_type=content_info.get("content_type", "other"),
         density=content_info.get("density", "medium"),
         num_clips_instruction=f"Generate at least {min_clips} highlights",
+        duration_rule=duration_rule(clip_seconds),
+        user_brief=brief_block(brief),
     )
     base_prompt = f"{system}\n\nTranscript:\n{transcript_text}"
     prompt = base_prompt
@@ -275,7 +332,8 @@ def call_highlight_api(
         raw = llm_fn(prompt)
         try:
             parsed = _parse_json_loose(raw)
-            highlights = _sanitize_highlights(parsed.get("highlights"), duration=duration)
+            highlights = _sanitize_highlights(parsed.get("highlights"), duration=duration,
+                                              clip_seconds=clip_seconds)
             if highlights:
                 return {"highlights": highlights}
             last_error = "no valid highlights in response"
@@ -320,9 +378,16 @@ def dedupe_highlights(highlights: List[Dict]) -> List[Dict]:
     return kept
 
 
-def _checkpoint_fingerprint(duration: float, chunk_count: int, num_clips: int) -> str:
-    """Identifies the run a saved checkpoint belongs to."""
-    return f"{duration:.0f}|{chunk_count}|{num_clips}"
+def _checkpoint_fingerprint(duration: float, chunk_count: int, num_clips: int,
+                            clip_seconds: Optional[List[float]] = None) -> str:
+    """Identifies the run a saved checkpoint belongs to.
+
+    Includes the requested clip length: asking for 30s clips after a run that
+    found 60s ones is a different question, and reusing those answers would
+    silently ignore what was asked for.
+    """
+    length = "-".join(str(int(x)) for x in clip_seconds) if clip_seconds else "default"
+    return f"{duration:.0f}|{chunk_count}|{num_clips}|{length}"
 
 
 def _load_checkpoint(path: Optional[Path], fingerprint: str) -> Dict[str, List[Dict]]:
@@ -360,6 +425,8 @@ def get_highlights(
     num_clips: int = 3,
     llm_fn: Optional[LLMFn] = None,
     checkpoint_path: Optional[Path] = None,
+    clip_seconds: Optional[List[float]] = None,
+    brief: str = "",
 ) -> Dict:
     """Main entry point — returns {highlights: [...]} sorted by score.
 
@@ -380,7 +447,7 @@ def get_highlights(
         chunks = chunk_transcript(transcript)
         print(f"[highlights] long video — splitting into {len(chunks)} chunks", flush=True)
 
-        fingerprint = _checkpoint_fingerprint(duration, len(chunks), num_clips)
+        fingerprint = _checkpoint_fingerprint(duration, len(chunks), num_clips, clip_seconds)
         done = _load_checkpoint(checkpoint_path, fingerprint)
         if done:
             print(f"[highlights] resuming — {len(done)}/{len(chunks)} chunk(s) "
@@ -396,7 +463,7 @@ def get_highlights(
 
             text = build_transcript_text(chunk)
             print(f"[highlights] chunk {i + 1}/{len(chunks)} (offset {offset:.0f}s)", flush=True)
-            result = call_highlight_api(text, content_info, chunk["duration"], num_clips=num_clips, is_chunk=True, llm_fn=llm_fn)
+            result = call_highlight_api(text, content_info, chunk["duration"], num_clips=num_clips, is_chunk=True, llm_fn=llm_fn, clip_seconds=clip_seconds, brief=brief)
             ranked = []
             for h in result.get("highlights", []):
                 h["start_time"] = float(h["start_time"]) + offset
@@ -412,7 +479,7 @@ def get_highlights(
         highlights = dedupe_highlights(all_highlights)
     else:
         text = build_transcript_text(transcript)
-        result = call_highlight_api(text, content_info, duration, num_clips=num_clips, llm_fn=llm_fn)
+        result = call_highlight_api(text, content_info, duration, num_clips=num_clips, llm_fn=llm_fn, clip_seconds=clip_seconds, brief=brief)
         highlights = dedupe_highlights(result.get("highlights", []))
 
     return {"highlights": highlights}
