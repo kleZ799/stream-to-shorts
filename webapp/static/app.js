@@ -181,6 +181,10 @@ async function checkSetup() {
     keysOnFile = d.keys || {};
     providerPinned = !!d.provider_pinned;
     drawModels(d);
+    drawLocalLlm(d, "setLocalUrl", "setLocalModel");
+    drawLocalLlm(d, "setLocalUrl2", "setLocalModel2");
+    toggleProviderFields($("setProvider").value, "keyFld", "localUrlFld", "localModelFld");
+    toggleProviderFields($("setProvider2").value, "keyFld2", "localUrlFld2", "localModelFld2");
     if (d.daily_limits) $("capOpenai").value = d.daily_limits.openai || "";
     drawSwitcher(d.provider);
     $("setInfo").innerHTML = `
@@ -380,18 +384,61 @@ function keyLinkFor(provider) {
   $("keyLink").href = gem ? "https://aistudio.google.com/apikey"
                           : "https://platform.openai.com/api-keys";
 }
-$("setProvider").onchange = () => keyLinkFor($("setProvider").value);
 
-async function saveKey(providerEl, keyEl, btn, msgEl, onDone) {
-  const key = keyEl.value.trim();
-  if (!key) { msgEl.innerHTML = `<div class="err">Paste a key first.</div>`; return; }
+// A local server needs a URL and a model, not a key — so the key field is
+// swapped out entirely rather than shown empty and confusing.
+function toggleProviderFields(provider, keyFldId, localUrlFldId, localModelFldId) {
+  const local = provider === "local_llm";
+  $(keyFldId).classList.toggle("hidden", local);
+  $(localUrlFldId).classList.toggle("hidden", !local);
+  $(localModelFldId).classList.toggle("hidden", !local);
+}
+
+// Models loaded on the local server right now, so picking one can't 404 —
+// nothing to offer just means "start the server and load a model first".
+function drawLocalLlm(d, urlId, modelId) {
+  $(urlId).value = d.local_llm_base_url || "";
+  const sel = $(modelId);
+  const models = d.local_llm_models || [];
+  if (!models.length) {
+    sel.innerHTML = d.model && d.provider === "local_llm"
+      ? `<option value="${esc(d.model)}" selected>${esc(d.model)}</option>`
+      : `<option value="">No models found — is the server running?</option>`;
+    return;
+  }
+  sel.innerHTML = models.map((m) => `<option value="${esc(m)}">${esc(m)}</option>`).join("");
+  if (d.provider === "local_llm" && models.includes(d.model)) sel.value = d.model;
+}
+
+$("setProvider").onchange = () => {
+  keyLinkFor($("setProvider").value);
+  toggleProviderFields($("setProvider").value, "keyFld", "localUrlFld", "localModelFld");
+};
+$("setProvider2").onchange = () =>
+  toggleProviderFields($("setProvider2").value, "keyFld2", "localUrlFld2", "localModelFld2");
+
+async function saveKey(providerEl, keyEl, btn, msgEl, onDone, localUrlEl, localModelEl) {
+  const provider = providerEl.value;
   const label = btn.textContent;
+  const payload = { provider };
+
+  if (provider === "local_llm") {
+    const model = localModelEl && localModelEl.value.trim();
+    if (!model) { msgEl.innerHTML = `<div class="err">Pick a model first.</div>`; return; }
+    payload.model = model;
+    if (localUrlEl && localUrlEl.value.trim()) payload.base_url = localUrlEl.value.trim();
+  } else {
+    const key = keyEl.value.trim();
+    if (!key) { msgEl.innerHTML = `<div class="err">Paste a key first.</div>`; return; }
+    payload.api_key = key;
+  }
+
   btn.disabled = true;
   btn.textContent = "Saving…";
   try {
-    await api("/api/settings", json("POST", { provider: providerEl.value, api_key: key }));
+    await api("/api/settings", json("POST", payload));
     msgEl.innerHTML = `<div class="ok-box">Saved. You're ready to go.</div>`;
-    keyEl.value = "";
+    if (keyEl) keyEl.value = "";
     checkSetup();
     if (onDone) setTimeout(onDone, 1100);
   } catch (e) {
@@ -404,10 +451,11 @@ async function saveKey(providerEl, keyEl, btn, msgEl, onDone) {
 
 $("setSave").onclick = () =>
   saveKey($("setProvider"), $("setKey"), $("setSave"), $("setMsg"),
-          () => $("setup").classList.add("hidden"));
+          () => $("setup").classList.add("hidden"), $("setLocalUrl"), $("setLocalModel"));
 
 $("setSave2").onclick = () =>
-  saveKey($("setProvider2"), $("setKey2"), $("setSave2"), $("setMsg2"), null);
+  saveKey($("setProvider2"), $("setKey2"), $("setSave2"), $("setMsg2"), null,
+          $("setLocalUrl2"), $("setLocalModel2"));
 
 // ---------------------------------------------------------------- locations
 

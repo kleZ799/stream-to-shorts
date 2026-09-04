@@ -5,6 +5,8 @@ from typing import Dict, List, Optional, Tuple
 
 from .. import usage
 from ..config import (
+    current_local_llm_api_key,
+    current_local_llm_base_url,
     current_model,
     current_provider,
     require_gemini_key,
@@ -79,6 +81,69 @@ def check_gemini_model(model: str) -> Optional[str]:
         if "503" in msg:
             return f"{model} is temporarily unavailable — try another."
         return f"{model} could not be used: {msg.splitlines()[0][:120]}"
+
+
+def list_local_llm_models() -> List[str]:
+    """Models currently loaded in the local OpenAI-compatible server.
+
+    LM Studio (and Ollama's OpenAI-compat endpoint) expose GET /v1/models
+    listing whatever is loaded right now, which is the only thing worth
+    offering — a name typed by hand 404s the moment nothing matches it.
+    """
+    try:
+        from openai import OpenAI  # type: ignore
+        client = OpenAI(base_url=current_local_llm_base_url(), api_key=current_local_llm_api_key())
+        return sorted(m.id for m in client.models.list())
+    except Exception as e:
+        print(f"[llm] could not list local models ({e})", flush=True)
+        return []
+
+
+def check_local_llm(model: str) -> Optional[str]:
+    """Try the model once against the local server. None means it works."""
+    try:
+        from openai import OpenAI  # type: ignore
+        client = OpenAI(base_url=current_local_llm_base_url(), api_key=current_local_llm_api_key())
+        client.chat.completions.create(
+            model=model, max_tokens=1, messages=[{"role": "user", "content": "hi"}],
+        )
+        return None
+    except Exception as e:
+        return f"{model} could not be used at {current_local_llm_base_url()}: {str(e).splitlines()[0][:160]}"
+
+
+def call_local_openai_llm(prompt: str) -> str:
+    """Local OpenAI-compatible backend (LM Studio, Ollama, llama.cpp server, ...)."""
+    try:
+        from openai import OpenAI  # type: ignore
+    except ImportError as e:
+        raise RuntimeError(
+            "openai is required for LLM_PROVIDER=local_llm. Install it with:\n"
+            "    pip install -r requirements-local.txt"
+        ) from e
+
+    model = current_model("local_llm")
+    if not model:
+        raise RuntimeError(
+            "LOCAL_LLM_MODEL is not set. Point it at whatever model is loaded in "
+            "LM Studio (or your local server), e.g. LOCAL_LLM_MODEL=llama-3.1-8b-instruct."
+        )
+    base_url = current_local_llm_base_url()
+    client = OpenAI(base_url=base_url, api_key=current_local_llm_api_key())
+    try:
+        response = client.chat.completions.create(
+            model=model,
+            temperature=0.7,
+            messages=[{"role": "user", "content": prompt}],
+        )
+    except Exception as e:
+        raise RuntimeError(
+            f"Could not reach the local LLM server at {base_url} ({e}). "
+            f"Make sure LM Studio (or your OpenAI-compatible server) is running "
+            f"and has {model} loaded."
+        ) from e
+    usage.record("local_llm", model)
+    return response.choices[0].message.content or ""
 
 
 class DailyQuotaExceeded(RuntimeError):
@@ -240,9 +305,11 @@ def call_local_llm(prompt: str) -> str:
 
     if provider == "openai":
         return call_openai_llm(prompt)
+    if provider == "local_llm":
+        return call_local_openai_llm(prompt)
     if provider != "gemini":
         raise RuntimeError(
-            f"Unknown LLM_PROVIDER={provider!r}. Use 'openai' or 'gemini'."
+            f"Unknown LLM_PROVIDER={provider!r}. Use 'openai', 'gemini', or 'local_llm'."
         )
 
     if usage.is_exhausted("gemini", current_model("gemini")):

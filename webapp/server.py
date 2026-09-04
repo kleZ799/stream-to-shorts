@@ -94,6 +94,8 @@ class SettingsRequest(BaseModel):
     # A self-imposed daily request cap, so a provider that bills instead of
     # cutting you off still has a line to draw a meter against. "" clears it.
     daily_limit: Optional[str] = None
+    # Where the local OpenAI-compatible server (LM Studio, etc.) is listening.
+    base_url: Optional[str] = None
 
 
 def _gemini_model_options() -> list:
@@ -117,6 +119,13 @@ def _gemini_model_options() -> list:
     return opts
 
 
+def _local_llm_model_options() -> list:
+    """Models currently loaded on the local OpenAI-compatible server, if reachable."""
+    from shorts_generator.local.llm import list_local_llm_models
+
+    return list_local_llm_models()
+
+
 @app.get("/api/settings")
 async def get_settings() -> dict:
     """What the UI needs to decide whether to show first-run setup.
@@ -125,7 +134,7 @@ async def get_settings() -> dict:
     it came from, so the user knows which knob actually controls it.
     """
     from shorts_generator import usage, user_config
-    from shorts_generator.config import current_model, current_provider
+    from shorts_generator.config import current_local_llm_base_url, current_model, current_provider
 
     provider = current_provider()
     from_env = bool(os.getenv("GEMINI_API_KEY") or os.getenv("OPENAI_API_KEY"))
@@ -141,6 +150,8 @@ async def get_settings() -> dict:
         "keys": {
             "gemini": bool(user_config.get("GEMINI_API_KEY")),
             "openai": bool(user_config.get("OPENAI_API_KEY")),
+            # A local server has no key — it's "set up" once a model is chosen.
+            "local_llm": bool(user_config.get("LOCAL_LLM_MODEL")),
         },
         "daily_limits": {
             "gemini": user_config.get("GEMINI_DAILY_LIMIT"),
@@ -156,6 +167,8 @@ async def get_settings() -> dict:
         # so the choice is made with the number in view.
         "gemini_models": _gemini_model_options(),
         "model_pinned": bool(os.getenv("GEMINI_MODEL", "").strip()),
+        "local_llm_base_url": current_local_llm_base_url(),
+        "local_llm_models": _local_llm_model_options(),
     }
 
 
@@ -193,36 +206,55 @@ async def set_settings(req: SettingsRequest) -> dict:
     from shorts_generator import user_config
 
     provider = (req.provider or "gemini").strip().lower()
-    if provider not in ("gemini", "openai"):
-        raise HTTPException(400, "Provider must be 'gemini' or 'openai'.")
-
-    key = (req.api_key or "").strip()
-    key_name = "GEMINI_API_KEY" if provider == "gemini" else "OPENAI_API_KEY"
-    # Switching to a provider whose key is already stored must not demand the
-    # key again — retyping a secret you already saved is not a security step,
-    # it is just a reason to keep the wrong provider selected.
-    if not key and not user_config.get(key_name):
-        raise HTTPException(400, "Paste an API key first.")
+    if provider not in ("gemini", "openai", "local_llm"):
+        raise HTTPException(400, "Provider must be 'gemini', 'openai', or 'local_llm'.")
 
     values = {} if req.as_fallback else {"LLM_PROVIDER": provider}
-    if key:
-        values[key_name] = key
-    if req.model:
-        model = req.model.strip()
-        if provider == "gemini":
-            # Prove it works before storing it, so a dead model is caught here
-            # rather than partway through a render that already cost a
-            # download and a transcription.
-            from shorts_generator.local.llm import check_gemini_model
-            problem = await asyncio.to_thread(check_gemini_model, model)
+
+    if provider == "local_llm":
+        # No API key to check — a local server takes any placeholder. What it
+        # actually needs is a reachable URL and a model that is loaded there.
+        if req.base_url is not None:
+            base_url = req.base_url.strip()
+            if not base_url:
+                raise HTTPException(400, "Enter the local server's URL first.")
+            values["LOCAL_LLM_BASE_URL"] = base_url
+        if req.model:
+            model = req.model.strip()
+            from shorts_generator.local.llm import check_local_llm
+            problem = await asyncio.to_thread(check_local_llm, model)
             if problem:
                 raise HTTPException(400, problem)
-        values["GEMINI_MODEL" if provider == "gemini" else "OPENAI_MODEL"] = model
-    if req.daily_limit is not None:
-        cap = req.daily_limit.strip()
-        if cap and not cap.isdigit():
-            raise HTTPException(400, "The daily cap must be a whole number of requests.")
-        values["GEMINI_DAILY_LIMIT" if provider == "gemini" else "OPENAI_DAILY_LIMIT"] = cap
+            values["LOCAL_LLM_MODEL"] = model
+        elif not user_config.get("LOCAL_LLM_MODEL"):
+            raise HTTPException(400, "Pick a model first.")
+    else:
+        key = (req.api_key or "").strip()
+        key_name = "GEMINI_API_KEY" if provider == "gemini" else "OPENAI_API_KEY"
+        # Switching to a provider whose key is already stored must not demand
+        # the key again — retyping a secret you already saved is not a
+        # security step, it is just a reason to keep the wrong provider
+        # selected.
+        if not key and not user_config.get(key_name):
+            raise HTTPException(400, "Paste an API key first.")
+        if key:
+            values[key_name] = key
+        if req.model:
+            model = req.model.strip()
+            if provider == "gemini":
+                # Prove it works before storing it, so a dead model is caught
+                # here rather than partway through a render that already cost
+                # a download and a transcription.
+                from shorts_generator.local.llm import check_gemini_model
+                problem = await asyncio.to_thread(check_gemini_model, model)
+                if problem:
+                    raise HTTPException(400, problem)
+            values["GEMINI_MODEL" if provider == "gemini" else "OPENAI_MODEL"] = model
+        if req.daily_limit is not None:
+            cap = req.daily_limit.strip()
+            if cap and not cap.isdigit():
+                raise HTTPException(400, "The daily cap must be a whole number of requests.")
+            values["GEMINI_DAILY_LIMIT" if provider == "gemini" else "OPENAI_DAILY_LIMIT"] = cap
 
     path = user_config.save(values)
     return {"saved": True, "config_path": str(path),

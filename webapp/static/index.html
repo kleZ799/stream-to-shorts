@@ -96,13 +96,22 @@
           <select id="setProvider">
             <option value="gemini" selected>Google Gemini &mdash; free tier</option>
             <option value="openai">OpenAI</option>
+            <option value="local_llm">Local (LM Studio, Ollama, ...)</option>
           </select>
         </label>
-        <label class="fld">
+        <label class="fld" id="keyFld">
           <span>API key <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener" id="keyLink">Get a free Gemini key &rarr;</a></span>
           <input type="password" id="setKey" placeholder="Paste your key here">
         </label>
+        <label class="fld hidden" id="localUrlFld">
+          <span>Server URL &mdash; OpenAI-compatible, e.g. LM Studio's local server</span>
+          <input type="text" id="setLocalUrl" placeholder="http://localhost:1234/v1">
+        </label>
       </div>
+      <label class="fld hidden" id="localModelFld">
+        <span>Model &mdash; whatever is currently loaded there</span>
+        <select id="setLocalModel"></select>
+      </label>
       <button class="btn primary" id="setSave">Save and continue</button>
       <div id="setMsg"></div>
     </section>
@@ -280,18 +289,27 @@
       <select id="setProvider2">
         <option value="gemini">Google Gemini &mdash; free tier</option>
         <option value="openai">OpenAI</option>
+        <option value="local_llm">Local (LM Studio, Ollama, ...)</option>
       </select>
     </label>
     <label class="fld" id="modelFld" hidden>
       <span>Gemini model &mdash; free requests per day differ a lot</span>
       <select id="setModel"></select>
     </label>
+    <label class="fld hidden" id="localUrlFld2">
+      <span>Server URL &mdash; OpenAI-compatible</span>
+      <input type="text" id="setLocalUrl2" placeholder="http://localhost:1234/v1">
+    </label>
+    <label class="fld hidden" id="localModelFld2">
+      <span>Model &mdash; whatever is currently loaded there</span>
+      <select id="setLocalModel2"></select>
+    </label>
     <p class="hint" id="modelHint"></p>
     <div class="switcher" id="switcher" hidden>
       <span id="switchNote"></span>
       <button class="btn ghost sm" id="switchBtn"></button>
     </div>
-    <label class="fld">
+    <label class="fld" id="keyFld2">
       <span>Replace API key</span>
       <input type="password" id="setKey2" placeholder="Paste a new key">
     </label>

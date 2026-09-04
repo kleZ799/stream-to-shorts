@@ -228,6 +228,19 @@ LOCAL_OUTPUT_DIR=output
 LOCAL_OUTPUT_RESOLUTION=1080x1920
 ```
 
+You can also run entirely offline against a local OpenAI-compatible server —
+[LM Studio](https://lmstudio.ai), Ollama, llama.cpp's `server`, etc. Start it,
+load a model, then point `LLM_PROVIDER` at it:
+
+```ini
+LLM_PROVIDER=local_llm
+LOCAL_LLM_BASE_URL=http://localhost:1234/v1
+LOCAL_LLM_MODEL=llama-3.1-8b-instruct
+```
+
+`LOCAL_LLM_BASE_URL` defaults to LM Studio's default port, so it can be
+omitted if you're not changing it. No API key is needed.
+
 Then point it at a VOD:
 
 ```bash
