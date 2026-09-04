@@ -15,6 +15,12 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
+# A local OpenAI-compatible server (LM Studio, Ollama, llama.cpp server, ...).
+# No API key is needed by these servers — they accept any non-empty string —
+# so a placeholder is the default rather than another required setting.
+LOCAL_LLM_BASE_URL = os.getenv("LOCAL_LLM_BASE_URL", "http://localhost:1234/v1").rstrip("/")
+LOCAL_LLM_MODEL = os.getenv("LOCAL_LLM_MODEL", "").strip()
+LOCAL_LLM_API_KEY = os.getenv("LOCAL_LLM_API_KEY", "lm-studio").strip()
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "gemini").strip().lower()
 LOCAL_WHISPER_MODEL = os.getenv("LOCAL_WHISPER_MODEL", "base")
 LOCAL_WHISPER_DEVICE = os.getenv("LOCAL_WHISPER_DEVICE", "auto")  # auto / cpu / cuda
@@ -63,7 +69,19 @@ def current_model(provider: str) -> str:
     from . import user_config
     if provider == "openai":
         return user_config.get("OPENAI_MODEL", OPENAI_MODEL)
+    if provider == "local_llm":
+        return user_config.get("LOCAL_LLM_MODEL", LOCAL_LLM_MODEL)
     return user_config.get("GEMINI_MODEL", GEMINI_MODEL)
+
+
+def current_local_llm_base_url() -> str:
+    from . import user_config
+    return (user_config.get("LOCAL_LLM_BASE_URL", LOCAL_LLM_BASE_URL) or LOCAL_LLM_BASE_URL).rstrip("/")
+
+
+def current_local_llm_api_key() -> str:
+    from . import user_config
+    return user_config.get("LOCAL_LLM_API_KEY", LOCAL_LLM_API_KEY) or "lm-studio"
 
 
 def require_openai_key() -> str:

@@ -126,4 +126,8 @@ def has_llm_key() -> bool:
     provider = (get("LLM_PROVIDER", "gemini") or "gemini").lower()
     if provider == "openai":
         return bool(get("OPENAI_API_KEY"))
+    if provider == "local_llm":
+        # A local OpenAI-compatible server needs no key — just a model name
+        # to send, since it accepts any placeholder as the api_key.
+        return bool(get("LOCAL_LLM_MODEL"))
     return bool(get("GEMINI_API_KEY"))
