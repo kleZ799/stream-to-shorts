@@ -31,13 +31,68 @@ def config_path() -> Path:
     return config_dir() / "settings.json"
 
 
+# Why the last load() failed, if it did. This file holds the user's API key:
+# reading it as {} because of a bad byte or a locked handle turns a fixable
+# problem into "GEMINI_API_KEY is not set" twenty minutes into a run, pointing
+# the user at a .env that was never involved. Remember the reason so the
+# message that finally reaches them can name it.
+_load_error: Optional[str] = None
+
+
+def load_error() -> Optional[str]:
+    """Why the stored config last failed to load, or None if it read cleanly."""
+    return _load_error
+
+
+def _note_load_failure(reason: Optional[str]) -> None:
+    """Record why load() gave up, printing each distinct reason once."""
+    global _load_error
+    was, _load_error = _load_error, reason
+    if reason and reason != was:
+        print(f"[config] {reason}", flush=True)
+
+
 def load() -> Dict:
-    """Read the stored config, or {} if there is nothing readable there."""
+    """Read the stored config, or {} if there is nothing readable there.
+
+    A missing file is ordinary — a first run has none, and that is not worth
+    a word. Everything else is: a file we can see but cannot use is a bug or
+    a broken install, and staying quiet about it only moves the failure
+    somewhere less obvious.
+    """
+    try:
+        path = config_path()
+    except OSError as e:
+        _note_load_failure(f"config directory unavailable ({e.strerror or e})")
+        return {}
+
     try:
         # utf-8-sig so a BOM left by a hand-edit doesn't read as a corrupt file.
-        return json.loads(config_path().read_text(encoding="utf-8-sig"))
-    except Exception:
+        raw = path.read_text(encoding="utf-8-sig")
+    except FileNotFoundError:
+        _note_load_failure(None)
         return {}
+    except OSError as e:
+        _note_load_failure(f"{path} could not be read ({e.strerror or e})")
+        return {}
+    except (LookupError, UnicodeError) as e:
+        _note_load_failure(f"{path} could not be decoded ({type(e).__name__}: {e})")
+        return {}
+
+    try:
+        data = json.loads(raw)
+    except ValueError as e:
+        _note_load_failure(f"{path} is not valid JSON ({e})")
+        return {}
+
+    if not isinstance(data, dict):
+        _note_load_failure(
+            f"{path} holds {type(data).__name__}, expected a JSON object"
+        )
+        return {}
+
+    _note_load_failure(None)
+    return data
 
 
 def save(values: Dict) -> Path:
@@ -50,8 +105,9 @@ def save(values: Dict) -> Path:
     current = load()
     if not current and path.exists() and path.stat().st_size > 0:
         raise RuntimeError(
-            f"{path} exists but could not be parsed as JSON. Refusing to overwrite it "
-            f"and lose the settings it holds — fix or move the file, then retry."
+            f"{path} exists but {load_error() or 'could not be read'}. Refusing to "
+            f"overwrite it and lose the settings it holds — fix or move the file, "
+            f"then retry."
         )
     current.update({k: v for k, v in values.items() if v is not None})
     path.write_text(json.dumps(current, indent=2), encoding="utf-8")
