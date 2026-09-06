@@ -5,6 +5,15 @@ the packaging around it - a title that earns the tap, a description that tells
 the algorithm what the clip is about, and tags that put it next to the videos
 its audience already watches.
 
+Those three are not equal, and the prompt below is built around the order.
+Titles and descriptions are the strong ranking signals; the first three
+hashtags in the description are what viewers actually see, rendered as links
+above the title; tags are a weak supporting signal that a long list only
+dilutes. And the title has one job before any of that: it has to NAME the
+thing. A title lifted straight out of the transcript reads fine to someone who
+watched the stream and is invisible to everyone else, because it contains no
+word anyone would ever search or browse for.
+
 This asks the same LLM that ranked the highlights to write that packaging, in
 one call for the whole batch. Two things it must be at once: accurate, because
 a title the clip does not deliver on gets swiped away in two seconds and drags
@@ -29,8 +38,13 @@ TITLE_LIMIT = 100
 DESCRIPTION_LIMIT = 4800
 TAGS_TOTAL_LIMIT = 460          # the real cap is 500 across all tags
 TAG_LIMIT = 30                  # characters per tag
-MAX_TAGS = 25
+# A dozen precise tags carry further than a wall of them: tags are a weaker
+# signal than the title and description, and padding the list only dilutes it.
+MAX_TAGS = 12
 HOOK_LIMIT = 60
+# Hashtags are the most visible metadata on the upload - the first three render
+# as links above the title - and past a handful they read as spam.
+MAX_HASHTAGS = 5
 
 # Ask for the whole batch at once. Ten separate calls would take ten times as
 # long and give the model no way to keep the titles from repeating each other.
@@ -45,33 +59,49 @@ THE TWO RULES THAT OUTRANK EVERYTHING BELOW:
 1. ACCURATE. Every claim in the title and description must be provable from that clip's own transcript, which is given to you. Never promise a reveal the clip does not contain, never name a person, game or number that is not said, never imply a stake the clip does not reach. A title the clip fails to deliver gets swiped in two seconds, and short-form ranking punishes that harder than a boring title ever could.
 2. VIRAL. Within what is true, pick the single most arresting framing. The strongest hook is almost always a real specific detail from the clip - the exact number, the exact word, the actual thing that happened - not a vague tease. Specific and true beats sensational and empty every time.
 
+HOW SHORTS ARE ACTUALLY DISTRIBUTED - write for this, not for a search engine:
+- The title is read in well under a second, on a phone, next to a video that is already playing. Front-loaded and concrete beats complete and tidy.
+- Titles and descriptions outrank tags as ranking signals. The words that name the subject must appear in the title and in the first line of the description, not only in the tag box.
+- The FIRST THREE hashtags in the description are shown as clickable links above the title. That makes them the most visible metadata on the whole upload, so they must be the terms this clip should be filed under.
+- A hashtag in the TITLE buys nothing and spends characters you need for keywords. Put no hashtags in the title.
+- 3-5 hashtags total. A longer list reads as spam, and past 15 every hashtag on the video is ignored outright.
+- A few precise tags beat a wall of them. Padding the tag list dilutes it.
+
 TITLE rules:
-- Under {title_limit} characters, and it must land at a glance on a phone
-- Front-load the hook: the first 3-4 words carry the curiosity or the payoff
-- Prefer the clip's own strongest concrete detail over an abstract summary
-- Curiosity gap, bold claim, or a number. Never "you won't believe" filler
+- Aim for 40-70 characters. Hard limit {title_limit}. It has to land at a glance on a phone
+- NAME THE SUBJECT. The game, person, show or topic actually in the clip must appear in the title - it is the one term a human would ever search or browse for, and a title without it is invisible outside the feed. Take the name from the source video's metadata above when the clip itself does not say it.
+- Front-load: the first 3-4 words carry the curiosity or the payoff, everything after them is context
+- Use ONE of these structures, whichever the clip genuinely supports:
+    - Curiosity gap: says enough to raise a question, withholds the answer
+    - Contradiction: the outcome fights the expectation the setup created
+    - Stakes: names the concrete thing that is about to go wrong or right
+    - Reaction framing: names who reacted and how hard
+    - Specific detail: the exact number, object or word lifted from the clip
+- A transcript line pasted in as a title is NOT a title. It carries no subject, no context and no question. Rewrite it into one of the structures above.
 - No ALL CAPS shouting, at most one emoji and only where it earns its place
-- End with #shorts only when the title still reads naturally with it
+- No hashtags, no clickbait the clip does not pay off, no "you won't believe" filler
 
 DESCRIPTION rules:
-- First line repeats the hook - it is the only line most viewers ever see
-- Then 1-2 short lines of real context so the topic is unmistakable to the ranker
-- Name the actual subject matter in plain words; this is what the algorithm reads
-- Then a light call to action (follow / full video / comment prompt)
-- Then 3-5 hashtags on their own line
-- Under 700 characters. Plain text, no markdown
+- Line 1: the hook as a full sentence - it is the only line most viewers ever see
+- Lines 2-3: what actually happens, in plain words, naming the game / person / topic and the kind of moment it is. This is the text the ranker reads to decide who to show the clip to, so spend it on real nouns, not adjectives
+- Then one short call to action. A specific question about THIS clip beats "comment below"
+- Then one line of 3-5 hashtags, #shorts first, then the most specific ones for this clip. Lowercase, no spaces inside a hashtag
+- Under 500 characters. Plain text, no markdown
 
 TAGS rules:
-- 15-25 lowercase tags, most specific first, comma-separated
-- Mix three kinds: the exact topic, the broader niche, and the format (shorts, clip, podcast clip, stream highlight)
-- Include the real names of any people, games, brands or places actually said in the clip
-- Nothing invented, no hashes, no duplicates, nothing over 30 characters
+- 6-12 lowercase tags, most specific first, comma-separated
+- Cover three things and then stop: the exact subject (the game, person or place actually in the clip), the niche it sits in, and the format (shorts, stream highlights, gaming clips)
+- Include the real names of any people, games, brands or places said in the clip or named in the source metadata
+- Nothing invented, no hashes, no duplicates, nothing over 30 characters, no padding
 
 HOOK_TEXT rules:
-- The on-screen caption to burn over the first 2 seconds
+- The on-screen caption burned over the first 2 seconds, read while the clip is already playing
 - Under 8 words, sentence case, no ending punctuation
-- Built from what is actually about to happen in the clip, so the payoff lands
-- It should make stopping the scroll feel involuntary
+- It must raise something the next three seconds answer, so scrolling away costs the viewer the answer
+- Never a summary of the clip, and never the same sentence as the title
+
+WHY_IT_WORKS rules:
+- One sentence for the channel owner: which structure you used and what it is betting on
 
 CLIPS
 {clips_block}
@@ -144,7 +174,7 @@ def _build_clips_block(highlights: List[Dict], transcript: Optional[Dict]) -> st
             f"--- CLIP {i} (rank {i} of {total}, "
             f"viral score {h.get('score', 'n/a')}, {max(0.0, end - start):.0f}s)\n"
             f"Working title: {h.get('title', '')}\n"
-            f"Hook line: {h.get('hook_sentence', '')}\n"
+            f"Opens on this line: {h.get('first_line') or h.get('hook_sentence', '')}\n"
             f"Why it was picked: {h.get('virality_reason', '')}\n"
             f"WHAT IS ACTUALLY SAID: {said}"
         )
@@ -187,6 +217,13 @@ def _clean_tags(raw: object, fallback: List[str]) -> List[str]:
 
 
 def _clean_hashtags(raw: object) -> List[str]:
+    """Normalize hashtags, and make sure #shorts leads.
+
+    YouTube renders the first three hashtags in a description as clickable
+    links above the title, so their order is not cosmetic - it is the most
+    valuable metadata slot on the whole upload. #shorts goes first because it
+    is what tells the platform the video belongs in the Shorts feed at all.
+    """
     items = raw if isinstance(raw, list) else []
     out, seen = [], set()
     for tag in items:
@@ -195,9 +232,25 @@ def _clean_hashtags(raw: object) -> List[str]:
             continue
         seen.add(tag.lower())
         out.append(tag)
-        if len(out) >= 5:
+        if len(out) >= MAX_HASHTAGS:
             break
+
+    if "#shorts" not in seen:
+        out = ["#shorts"] + out[:MAX_HASHTAGS - 1]
+    else:
+        out.sort(key=lambda t: t.lower() != "#shorts")
     return out
+
+
+def _strip_title_hashtags(title: str) -> str:
+    """Take the hashtags back out of a title.
+
+    They earn nothing there - the ones that get shown come from the description
+    - and they spend characters the title needs for the words someone might
+    actually search for.
+    """
+    title = re.sub(r"#\w+", " ", title)
+    return re.sub(r"\s+", " ", title).strip(" -|,")
 
 
 def _fallback_for(h: Dict, video_meta: Optional[Dict]) -> Dict:
@@ -214,11 +267,15 @@ def _fallback_for(h: Dict, video_meta: Optional[Dict]) -> Dict:
     hashtags = ["#shorts", "#clips", "#viral"]
 
     words = re.findall(r"[a-z]{4,}", f"{title} {h.get('virality_reason', '')}".lower())
-    topic = list(dict.fromkeys(words))[:8]
+    topic = list(dict.fromkeys(words))[:6]
     source_title = (video_meta or {}).get("title", "")
+    # The source listing is the only place the subject's actual name is written
+    # down, and naming the subject is most of what makes a clip findable - so
+    # even the offline fallback should carry it into the tags.
+    source_tags = [str(t) for t in (video_meta or {}).get("tags", [])[:4]]
 
     return {
-        "title": f"{title} #shorts"[:TITLE_LIMIT],
+        "title": title[:TITLE_LIMIT],
         "description": "\n".join([
             title,
             "",
@@ -227,8 +284,8 @@ def _fallback_for(h: Dict, video_meta: Optional[Dict]) -> Dict:
             "",
             " ".join(hashtags),
         ]),
-        "tags": _clean_tags(topic + ["shorts", "viral clips", "podcast clip",
-                                     "stream highlights", "funny moments"], []),
+        "tags": _clean_tags(source_tags + topic
+                            + ["shorts", "stream highlights", "gaming clips"], []),
         "hashtags": hashtags,
         "hook_text": (h.get("hook_sentence") or h.get("title") or "")[:HOOK_LIMIT],
         "why_it_works": h.get("virality_reason", ""),
@@ -240,7 +297,7 @@ def _coerce_entry(item: Dict, h: Dict, video_meta: Optional[Dict]) -> Dict:
     """Force one model entry into shape, filling any gap from the fallback."""
     base = _fallback_for(h, video_meta)
 
-    title = re.sub(r"\s+", " ", str(item.get("title") or "")).strip()[:TITLE_LIMIT]
+    title = _strip_title_hashtags(str(item.get("title") or ""))[:TITLE_LIMIT]
     if not title:
         title = base["title"]
 
