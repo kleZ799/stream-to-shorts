@@ -9,6 +9,14 @@ Logic ported from ViralVadoo's transcript_analysis/highlight_generator.py:
 The LLM call is pluggable via the `llm_fn` argument so the same prompts can
 drive either MuAPI (default, --mode api) or a direct local LLM client
 (--mode local).
+
+One thing here is not ported and is worth stating plainly, because it is the
+difference between a clip that gets shown and one that does not: a highlight is
+ranked on where it OPENS, not only on how good its best moment is. Short-form
+distribution is decided in the first second - the early drop-off is read as a
+verdict on the whole clip - so a moment that needs eight seconds of setup before
+it pays off is worth less than a weaker moment that opens cold on its own hook.
+The model scores both, and `score` is the blend the rest of the app sorts on.
 """
 import json
 import re
@@ -70,9 +78,36 @@ Virality signals to prioritize (ranked by impact):
 Hard rules for stream VODs:
 - SKIP dead air, loading screens, technical difficulties, and stream housekeeping
 - SKIP anything requiring 10 minutes of prior context — it must land for a stranger
-- Start 2-5 seconds BEFORE the moment so the payoff has setup, never after
 - If a span is entirely game narration with no streamer speech, DO NOT return it
 """
+
+COLD_OPEN_RULES = """
+HOW A CLIP MUST START - this decides whether it gets shown to anyone at all:
+
+A Short is judged in its first second. Around half of everyone who leaves is
+gone inside three seconds, and the platform reads that early drop as "low value"
+and stops distributing the clip, no matter how good second 20 is. So the opening
+line is not the run-up to the clip. It IS the clip's audition.
+
+- START ON THE HOOK, NOT THE RUN-UP. start_time goes on the first word of the
+  most arresting line in the moment. Cut the throat-clear, the "so", the "okay
+  so basically", the menu, the walking, the silence before the reaction.
+- NO SETUP FIRST. If the interesting thing happens 8 seconds into a span, the
+  clip starts at second 8 - not at second 0 with the context first. Either the
+  context is implied by the moment, or the moment is not clippable.
+- AT MOST ~1 SECOND OF RUNWAY, and only when the payoff is a sound rather than
+  a sentence (a laugh, a scream, a gasp), where the instant before it lands is
+  what makes the sound read.
+- THE FIRST LINE MUST WORK ALONE. Read only the opening sentence, as a stranger
+  who has never seen this video and knows nothing about it. If it does not
+  create a question, a shock, or a laugh by itself, the clip starts in the wrong
+  place - move start_time until it does.
+- END ON THE PUNCH. end_time lands just after the payoff, never trailing into
+  dead air, a topic change, or "anyway". A clip that ends flat loses the replay.
+- A MOMENT THAT NEEDS A PREAMBLE IS NOT A HIGHLIGHT. If it cannot open cold,
+  skip it and spend the slot on one that can.
+"""
+
 
 # Which criteria block gets injected into the highlight prompt.
 # Swap to VIRALITY_CRITERIA for edited/long-form content.
@@ -82,25 +117,35 @@ ACTIVE_VIRALITY_CRITERIA = STREAM_VIRALITY_CRITERIA
 HIGHLIGHT_SYSTEM_PROMPT = """You are an elite short-form video editor who has studied thousands of viral clips on TikTok, Instagram Reels, and YouTube Shorts. You know exactly what makes viewers stop scrolling, watch to the end, and share.
 
 {virality_criteria}
-
+{cold_open_rules}
 Content type: {content_type} | Density: {density}
 {user_brief}
 Your task: identify the most viral-worthy highlights from the transcript.
 
 Rules:
-- Every highlight must open with a strong HOOK — a line that grabs attention within the first 3 seconds
 - {duration_rule}
 - Never cut mid-sentence or mid-thought — each clip must feel complete and self-contained
 - Clips must not overlap significantly with each other
-- Score 0-100 on viral potential (not general quality)
 - {num_clips_instruction}
-- For each highlight, identify the single best "hook_sentence" — the opening line that would make someone stop scrolling
+- "first_line" is the exact transcript sentence the clip opens on, copied
+  verbatim. Write it out before you settle on start_time — if the line you are
+  about to copy is filler, setup, or a neutral observation, then the clip starts
+  in the wrong place and you must move start_time to a line that hooks.
+- "hook_sentence" is that same opening line
+- Score each clip TWICE, 0-100, independently:
+    "score" — viral potential of the moment as a whole
+    "hook_score" — how hard "first_line" ALONE stops a scroll, judged as if you
+      cannot see the rest of the clip. Setup, filler or a flat observation
+      scores under 40 here however good the payoff is. Be harsh: this is the
+      number that decides whether anybody ever reaches the payoff.
 - Explain in one sentence why this clip is viral ("virality_reason")
 
 Respond ONLY with valid JSON (no markdown, no explanation):
-{{"highlights":[{{"title":"string","start_time":float,"end_time":float,"score":int,"hook_sentence":"string","virality_reason":"string"}}]}}"""
+{{"highlights":[{{"title":"string","start_time":float,"end_time":float,"score":int,"hook_score":int,"first_line":"string","hook_sentence":"string","virality_reason":"string"}}]}}"""
 
 
+PROMPT_VERSION = 2            # bump whenever the ranking prompt changes meaning
+HOOK_SCORE_WEIGHT = 0.4       # how much the opening line counts toward the rank
 MAX_CLIP_SECONDS = 90         # reject anything the model returns above this
 CHUNK_SIZE_SECONDS = 1200       # 20-min chunks for long videos
 LONG_VIDEO_THRESHOLD = 1800     # chunk videos longer than 30 min
@@ -166,9 +211,11 @@ def _coerce_int(value: object, default: int = 0) -> int:
 
 
 DEFAULT_DURATION_RULE = (
-    "Duration: TARGET 30-60 seconds. This is a hard preference — short clips "
-    "finish, and completion rate is what the algorithm rewards. Go to 20-29s "
-    "for a perfect standalone one-liner. NEVER exceed 75 seconds"
+    "Duration: TARGET 18-35 seconds. Completion rate is the signal that buys "
+    "distribution, and the bar is stricter the longer the clip runs — a 20s "
+    "clip watched to the end beats a 45s clip watched halfway, every time. "
+    "Drop to 10-17s for a single perfect line. Go past 40s only when the payoff "
+    "genuinely needs the room, and NEVER exceed 60 seconds"
 )
 
 
@@ -243,13 +290,26 @@ def _sanitize_highlights(raw_highlights: object, duration: float,
             if end <= start:
                 continue
 
+        viral = max(0, min(100, _coerce_int(item.get("score"), default=0)))
+        # A model that ignores the field should not be punished for it, so an
+        # absent hook_score means "no opinion" rather than zero.
+        hook = max(0, min(100, _coerce_int(item.get("hook_score"), default=viral)))
+
         cleaned.append(
             {
                 "title": str(item.get("title") or "Untitled Highlight").strip(),
                 "start_time": start,
                 "end_time": end,
-                "score": max(0, min(100, _coerce_int(item.get("score"), default=0))),
-                "hook_sentence": str(item.get("hook_sentence") or "").strip(),
+                # What every caller sorts and cuts on. A brilliant moment behind
+                # a flat opening line is not a good Short, because nobody stays
+                # long enough to reach it — so the opening line gets a real vote.
+                "score": int(round(HOOK_SCORE_WEIGHT * hook
+                                   + (1 - HOOK_SCORE_WEIGHT) * viral)),
+                "viral_score": viral,
+                "hook_score": hook,
+                "first_line": str(item.get("first_line") or "").strip(),
+                "hook_sentence": str(item.get("hook_sentence")
+                                     or item.get("first_line") or "").strip(),
                 "virality_reason": str(item.get("virality_reason") or "").strip(),
             }
         )
@@ -318,6 +378,7 @@ def call_highlight_api(
     min_clips = min(target, natural_max, 8)
     system = HIGHLIGHT_SYSTEM_PROMPT.format(
         virality_criteria=ACTIVE_VIRALITY_CRITERIA,
+        cold_open_rules=COLD_OPEN_RULES,
         content_type=content_info.get("content_type", "other"),
         density=content_info.get("density", "medium"),
         num_clips_instruction=f"Generate at least {min_clips} highlights",
@@ -384,10 +445,13 @@ def _checkpoint_fingerprint(duration: float, chunk_count: int, num_clips: int,
 
     Includes the requested clip length: asking for 30s clips after a run that
     found 60s ones is a different question, and reusing those answers would
-    silently ignore what was asked for.
+    silently ignore what was asked for. PROMPT_VERSION does the same job across
+    releases - chunks ranked by an older prompt are answers to a question we no
+    longer ask, and resuming onto them would hide the change from every video
+    that has already been through the app once.
     """
     length = "-".join(str(int(x)) for x in clip_seconds) if clip_seconds else "default"
-    return f"{duration:.0f}|{chunk_count}|{num_clips}|{length}"
+    return f"v{PROMPT_VERSION}|{duration:.0f}|{chunk_count}|{num_clips}|{length}"
 
 
 def _load_checkpoint(path: Optional[Path], fingerprint: str) -> Dict[str, List[Dict]]:

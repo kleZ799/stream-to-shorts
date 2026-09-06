@@ -325,7 +325,7 @@ The knobs that change output quality most, in order:
 | `corner` | `local/gaming_layout.py` | Which corner your webcam overlay sits in. `bottom-left` by default |
 | `CAM_PANEL_FRACTION` | `local/gaming_layout.py` | Webcam panel height, `0.42` by default |
 | `FACE_CONTEXT_MULTIPLE` | `local/gaming_layout.py` | Webcam zoom. Lower is tighter on your face |
-| `MAX_CLIP_SECONDS` | `shorts_generator/highlights.py` | Hard reject above 90s. The prompt separately targets 30–60s, because completion rate is what the algorithm rewards |
+| `MAX_CLIP_SECONDS` | `shorts_generator/highlights.py` | Hard reject above 90s. The prompt separately targets 18–35s, because the completion bar gets stricter the longer a clip runs |
 | `LOCAL_WHISPER_MODEL` | `.env` | `base` is plenty for ranking. `small` and `medium` read better but are much slower on CPU |
 
 ---

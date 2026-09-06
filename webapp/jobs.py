@@ -525,6 +525,8 @@ class JobStore:
                 "end_time": s.get("end_time"),
                 "duration": round(float(s.get("end_time", 0)) - float(s.get("start_time", 0)), 1),
                 "hook_sentence": s.get("hook_sentence"),
+                "hook_score": s.get("hook_score"),
+                "first_line": s.get("first_line"),
                 "virality_reason": s.get("virality_reason"),
                 "seo": s.get("seo"),
                 "error": s.get("error"),
@@ -621,6 +623,7 @@ def regenerate_seo(store: "JobStore", job: Job, force: bool = False) -> int:
             "end_time": float(end) if end is not None else float(c.get("duration") or 0.0),
             "score": c.get("score"),
             "hook_sentence": c.get("hook_sentence") or "",
+            "first_line": c.get("first_line") or "",
             "virality_reason": c.get("virality_reason") or "",
             "transcript_text": _clip_words(job, c),
         })
