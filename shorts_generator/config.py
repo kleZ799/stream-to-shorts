@@ -1,8 +1,35 @@
 import os
+import sys
+from pathlib import Path
 
 from dotenv import load_dotenv
 
+
+def _env_file_candidates():
+    """Directories a packaged run might reasonably keep a .env in.
+
+    A bare load_dotenv() searches the current directory. The packaged build
+    chdirs to the user's Videos folder before anything here is imported, so
+    it searches a folder that has never held a .env — and someone who put
+    their key in the repo's .env and then ran the .exe gets told the key "is
+    not set", which is true only of the directory we happened to be standing
+    in. Look beside the executable and in the config directory too.
+    """
+    seen = []
+    if getattr(sys, "frozen", False):
+        seen.append(Path(sys.executable).resolve().parent)
+    appdata = os.environ.get("APPDATA")
+    if appdata:
+        seen.append(Path(appdata) / "StreamToShorts")
+    return seen
+
+
 load_dotenv()
+for _candidate in _env_file_candidates():
+    _env_file = _candidate / ".env"
+    if _env_file.is_file():
+        # override=False: a real environment variable still wins, as documented.
+        load_dotenv(_env_file, override=False)
 
 MUAPI_API_KEY = os.getenv("MUAPI_API_KEY", "").strip()
 MUAPI_BASE_URL = os.getenv("MUAPI_BASE_URL", "https://api.muapi.ai/api/v1").rstrip("/")
@@ -66,17 +93,37 @@ def current_model(provider: str) -> str:
     return user_config.get("GEMINI_MODEL", GEMINI_MODEL)
 
 
+def _where_we_looked(name: str) -> str:
+    """Name the places a key could have come from, and why one didn't work.
+
+    "Add it to your .env" is bad advice when the key is already saved and the
+    settings file is what broke. Say which file, and say what went wrong.
+    """
+    from . import user_config
+
+    try:
+        path = user_config.config_path()
+    except OSError:
+        return f" Checked the environment for {name}."
+
+    why = user_config.load_error()
+    if why:
+        return (
+            f" A {name} saved in {path} was NOT used, because that file {why}. "
+            f"Fix or delete that file, or set {name} in the environment."
+        )
+    return f" Checked the environment and {path} for {name}."
+
+
 def require_openai_key() -> str:
     from . import user_config
     key = user_config.get("OPENAI_API_KEY", OPENAI_API_KEY)
     if key:
         return key
-    if not OPENAI_API_KEY:
-        raise RuntimeError(
-            "OPENAI_API_KEY is not set. Local mode needs an OpenAI key for highlight ranking. "
-            "Add it to your .env or export it, or switch back to --mode api."
-        )
-    return OPENAI_API_KEY
+    raise RuntimeError(
+        "OPENAI_API_KEY is not set. Local mode needs an OpenAI key for highlight "
+        "ranking." + _where_we_looked("OPENAI_API_KEY")
+    )
 
 
 def require_gemini_key() -> str:
@@ -84,9 +131,7 @@ def require_gemini_key() -> str:
     key = user_config.get("GEMINI_API_KEY", GEMINI_API_KEY)
     if key:
         return key
-    if not GEMINI_API_KEY:
-        raise RuntimeError(
-            "GEMINI_API_KEY is not set. Local mode needs a Gemini key when LLM_PROVIDER=gemini. "
-            "Add it to your .env or export it, or switch LLM_PROVIDER back to openai."
-        )
-    return GEMINI_API_KEY
+    raise RuntimeError(
+        "GEMINI_API_KEY is not set. Local mode needs a Gemini key when "
+        "LLM_PROVIDER=gemini." + _where_we_looked("GEMINI_API_KEY")
+    )
