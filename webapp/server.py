@@ -623,10 +623,13 @@ async def get_clip(job_id: str, filename: str) -> FileResponse:
     if not job:
         raise HTTPException(404, "No such job")
 
-    # Never let a filename escape the job's own directory.
+    # Never let a filename escape the job's own directory. _clip_path is the
+    # one containment check in this file: comparing resolved paths as strings
+    # treats a sibling folder whose name merely starts with this one's as being
+    # inside it, which is the classic way a prefix check lets something through.
     safe = os.path.basename(filename)
-    path = (Path(job.out_dir) / safe).resolve()
-    if not str(path).startswith(str(Path(job.out_dir).resolve())) or not path.exists():
+    path = _clip_path(job, safe)
+    if not path.exists():
         raise HTTPException(404, "No such clip")
 
     return FileResponse(path, media_type="video/mp4", filename=safe)
@@ -637,7 +640,11 @@ async def get_clip(job_id: str, filename: str) -> FileResponse:
 # Everything below works on clips a finished job already produced, so the user
 # can fix a cut without re-running the whole pipeline.
 
-MAX_CLIP_SECONDS = 300
+# The longest span the trim editor will re-cut. Deliberately not the same
+# number as highlights.MAX_CLIP_SECONDS, which caps what the *ranker* may
+# hand back -- a hand-driven trim is allowed to be longer than anything the
+# model is trusted to propose.
+MAX_TRIM_SECONDS = 300
 
 
 class TrimRequest(BaseModel):
@@ -704,8 +711,8 @@ async def trim_clip(job_id: str, filename: str, req: TrimRequest) -> dict:
         raise HTTPException(400, "Start can't be before the beginning of the video.")
     if end - start < 1.0:
         raise HTTPException(400, "A clip needs to be at least a second long.")
-    if end - start > MAX_CLIP_SECONDS:
-        raise HTTPException(400, f"Keep clips under {MAX_CLIP_SECONDS // 60} minutes.")
+    if end - start > MAX_TRIM_SECONDS:
+        raise HTTPException(400, f"Keep clips under {MAX_TRIM_SECONDS // 60} minutes.")
 
     old_path = _clip_path(job, clip["file"])
     highlight = {
