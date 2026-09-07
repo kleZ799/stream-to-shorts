@@ -144,7 +144,10 @@ Respond ONLY with valid JSON (no markdown, no explanation):
 {{"highlights":[{{"title":"string","start_time":float,"end_time":float,"score":int,"hook_score":int,"first_line":"string","hook_sentence":"string","virality_reason":"string"}}]}}"""
 
 
-PROMPT_VERSION = 2            # bump whenever the ranking prompt changes meaning
+# Bump whenever the ranking prompt -- or the shape of the transcript we hand
+# it -- changes meaning. v3 widened each chunk's declared duration to cover its
+# overlap tail, so chunks ranked under v2 were asked a narrower question.
+PROMPT_VERSION = 3
 HOOK_SCORE_WEIGHT = 0.4       # how much the opening line counts toward the rank
 MAX_CLIP_SECONDS = 90         # reject anything the model returns above this
 CHUNK_SIZE_SECONDS = 1200       # 20-min chunks for long videos
@@ -340,9 +343,17 @@ def chunk_transcript(transcript: Dict) -> List[Dict]:
     start = 0
     while start < duration:
         end = min(start + CHUNK_SIZE_SECONDS, duration)
+        # The window carries a tail of extra context past its own end, so a
+        # moment straddling the boundary is still readable in full. That tail
+        # has to count toward the chunk's declared duration as well: it is the
+        # clamp bound _sanitize_highlights measures against, and leaving it at
+        # `end - start` threw away every highlight the model found in the last
+        # 60 seconds of each chunk -- silently, because clamping a span to
+        # start == end just drops it.
+        seg_end = min(end + CHUNK_OVERLAP_SECONDS, duration)
         chunk_segs = [
             s for s in segments
-            if s["start"] >= start and s["end"] <= end + CHUNK_OVERLAP_SECONDS
+            if s["start"] >= start and s["end"] <= seg_end
         ]
         if chunk_segs:
             # Rebase segment times to the chunk so they match the relative
@@ -354,7 +365,7 @@ def chunk_transcript(transcript: Dict) -> List[Dict]:
                 {**seg, "start": seg["start"] - start, "end": seg["end"] - start}
                 for seg in chunk_segs
             ]
-            chunk["duration"] = end - start
+            chunk["duration"] = seg_end - start
             chunk["_offset"] = start
             chunks.append(chunk)
         start += CHUNK_SIZE_SECONDS - CHUNK_OVERLAP_SECONDS
