@@ -6,16 +6,79 @@ expects: {duration, segments[start, end, text]}.
 import os
 import re
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
+from .. import user_config
 from ..config import LOCAL_OUTPUT_DIR, LOCAL_WHISPER_DEVICE, LOCAL_WHISPER_MODEL
 
 
+def _cache_candidates(media_path: str) -> List[Path]:
+    """Every place this file's transcript could live, best first.
+
+    The cache used to be built from LOCAL_OUTPUT_DIR alone, which is relative
+    and therefore resolves against the *current working directory* — while the
+    video it belongs to is written under OUTPUT_ROOT. Those are the same folder
+    by default and diverge the moment someone moves their save location, at
+    which point the transcript is written somewhere the lookup never checks and
+    every video re-transcribes from scratch. Twenty minutes, silently, again.
+
+    So the cache follows the video. The older locations are still *read*, so an
+    existing transcript is never orphaned by this change.
+    """
+    media = Path(media_path)
+    name = media.stem + ".srt"
+
+    candidates = [media.with_suffix(".srt")]
+    try:
+        candidates.append(user_config.source_dir() / name)
+    except OSError:
+        pass                        # unreadable config dir is not fatal here
+    candidates.append(Path(LOCAL_OUTPUT_DIR) / name)
+
+    out: List[Path] = []
+    seen = set()
+    for path in candidates:
+        try:
+            key = path.resolve()
+        except OSError:
+            key = path
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(path)
+    return out
+
+
+def _find_cached_transcript(media_path: str) -> Optional[Path]:
+    """An existing .srt for this media file, wherever an older run left it."""
+    for path in _cache_candidates(media_path):
+        if path.exists():
+            return path
+    return None
+
+
 def _transcript_cache_path(media_path: str) -> Path:
-    """Return the .srt cache path for a media file."""
-    cache_dir = Path(LOCAL_OUTPUT_DIR)
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    return cache_dir / (Path(media_path).stem + ".srt")
+    """Where to write this media file's .srt cache.
+
+    Prefers the folder holding the video, so the pair stays together. Falls
+    back through the configured folders when that directory cannot be written
+    to — a read-only share or a mounted drive must cost the cache, not the run.
+    """
+    existing = _find_cached_transcript(media_path)
+    if existing:
+        return existing
+
+    candidates = _cache_candidates(media_path)
+    for path in candidates:
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            probe = path.parent / ".stream-to-shorts-write-test"
+            probe.write_text("ok", encoding="utf-8")
+            probe.unlink()
+            return path
+        except OSError:
+            continue
+    return candidates[0]
 
 
 def _format_srt_timestamp(seconds: float) -> str:
@@ -97,8 +160,8 @@ def _resolve_device() -> str:
 
 def transcribe_local(media_path: str, language: Optional[str] = None) -> Dict:
     """Run faster-whisper on a local file path, caching the result as .srt."""
-    cache_path = _transcript_cache_path(media_path)
-    if cache_path.exists():
+    cache_path = _find_cached_transcript(media_path)
+    if cache_path is not None:
         source_mtime = os.path.getmtime(media_path)
         cache_mtime = cache_path.stat().st_mtime
         if cache_mtime >= source_mtime:
