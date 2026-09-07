@@ -22,6 +22,7 @@ import re
 import threading
 import time
 import traceback
+import unicodedata
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -46,7 +47,92 @@ def _title_from_filename(name: str) -> str:
     m = re.fullmatch(r"(?:short|edit)_(\d+)(?:_\d+)?", stem)
     if m:
         return f"Clip {int(m.group(1))}"
-    return re.sub(r"[_-]+", " ", stem).strip().title() or stem
+    # Clips are named after their own title now, so the stem usually *is* the
+    # title and re-casing it would only damage it. Only the underscore-joined
+    # shape older runs left behind still needs unpacking.
+    if "_" in stem and " " not in stem:
+        return re.sub(r"[_-]+", " ", stem).strip().title() or stem
+    return stem
+
+
+# Long enough to stay recognisable, short enough that the whole path survives
+# Windows' 260-character limit once it sits inside a job folder.
+MAX_STEM_CHARS = 80
+
+# Reserved device names on Windows. A file called "con.mp4" cannot be created.
+_RESERVED_STEMS = {"con", "prn", "aux", "nul",
+                   *(f"com{i}" for i in range(1, 10)),
+                   *(f"lpt{i}" for i in range(1, 10))}
+
+# Punctuation worth keeping in a filename. Everything outside this and
+# alphanumerics goes, which drops the emoji the titles are written with and the
+# characters Windows forbids (\ / : * ? " < > |) in the same pass. `#` and `%`
+# are excluded deliberately too: the filename becomes a URL path segment, and
+# a `#` there truncates it into a fragment.
+_KEEP_PUNCT = set(" -_'(),.!&+")
+
+
+def safe_stem(title: str, fallback: str = "clip") -> str:
+    """A filesystem-safe filename stem from a clip's generated title.
+
+    Keeps alphanumerics from any script -- isalnum() is Unicode-aware, so a
+    Hindi or Japanese title survives -- and a little punctuation, then drops
+    everything else rather than trusting the model not to return a slash.
+    """
+    # Combining marks have to survive alongside the letters they attach to:
+    # they are not alphanumeric on their own, and dropping them turns Hindi's
+    # "क्या" into "क य" -- every Indic, Thai and Arabic title quietly mangled.
+    kept = [ch if (ch.isalnum() or ch in _KEEP_PUNCT
+                   or unicodedata.category(ch).startswith("M")) else " "
+            for ch in (title or "")]
+    stem = re.sub(r"\s+", " ", "".join(kept)).strip(" .-_")
+
+    if len(stem) > MAX_STEM_CHARS:
+        cut = stem[:MAX_STEM_CHARS]
+        # Prefer a word boundary, but only if one is near the end -- otherwise
+        # a title with no spaces would be cut back to almost nothing.
+        space = cut.rfind(" ")
+        stem = (cut[:space] if space > MAX_STEM_CHARS - 20 else cut).strip(" .-_")
+
+    if not stem or stem.lower() in _RESERVED_STEMS:
+        return fallback
+    return stem
+
+
+def _unique_path(folder: Path, stem: str, suffix: str) -> Path:
+    """`stem.mp4`, then `stem_2.mp4`, … — the first name not already taken."""
+    candidate = folder / f"{stem}{suffix}"
+    n = 2
+    while candidate.exists():
+        candidate = folder / f"{stem}_{n}{suffix}"
+        n += 1
+    return candidate
+
+
+def rename_to_title(folder: Path, current: str, title: str) -> str:
+    """Rename a rendered clip to its title. Returns the name it ends up with.
+
+    A clip called short_03.mp4 tells you nothing in a folder of thirty; the
+    title the SEO writer produced is the one thing that identifies it at a
+    glance, and it is what gets uploaded anyway. Never raises -- a clip that
+    cannot be renamed is still a clip, so it keeps the name it has.
+    """
+    src = folder / current
+    if not src.exists():
+        return current
+
+    suffix = src.suffix or ".mp4"
+    stem = safe_stem(title, fallback=src.stem)
+    if stem == src.stem:
+        return current
+
+    dest = _unique_path(folder, stem, suffix)
+    try:
+        src.rename(dest)
+    except OSError as e:
+        print(f"[jobs] could not rename {current} to {dest.name}: {e}", flush=True)
+        return current
+    return dest.name
 
 
 def _fmt_clock(seconds: float) -> str:
@@ -515,6 +601,14 @@ class JobStore:
         rendered = []
         for i, s in enumerate(shorts, 1):
             path = s.get("clip_url")
+            # Name the file after the title it will be uploaded under. SEO runs
+            # before rendering, so the title is already there by the time the
+            # mp4 exists.
+            name = os.path.basename(path) if path else None
+            if name:
+                seo = s.get("seo") or {}
+                name = rename_to_title(Path(job.out_dir), name,
+                                       seo.get("title") or s.get("title") or "")
             rendered.append({
                 "index": i,
                 # `shorts` arrives best-first, so position is the ranking.
@@ -531,8 +625,8 @@ class JobStore:
                 "seo": s.get("seo"),
                 "error": s.get("error"),
                 "job_id": job.id,
-                "file": os.path.basename(path) if path else None,
-                "url": f"/api/jobs/{job.id}/clips/{os.path.basename(path)}" if path else None,
+                "file": name,
+                "url": f"/api/jobs/{job.id}/clips/{name}" if name else None,
             })
 
         ok = [c for c in rendered if c["url"]]
@@ -641,8 +735,19 @@ def regenerate_seo(store: "JobStore", job: Job, force: bool = False) -> int:
     for clip, seo in zip(targets, written):
         if seo.get("generated") or not clip.get("seo"):
             store.set_seo(job, clip["file"], seo)
-        if seo.get("generated"):
-            kept += 1
+        if not seo.get("generated"):
+            continue
+        kept += 1
+        # A rewritten title is a rewritten filename. Leaving the old name on
+        # disk is how a folder ends up full of clips named after titles that
+        # were replaced hours ago.
+        new_name = rename_to_title(Path(job.out_dir), clip["file"],
+                                   seo.get("title") or "")
+        if new_name != clip["file"]:
+            store.replace_clip(job, clip["file"], {
+                "file": new_name,
+                "url": f"/api/jobs/{job.id}/clips/{new_name}",
+            })
 
     if not kept:
         # Returning a count of fallbacks read as success all the way to the UI,

@@ -22,7 +22,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from shorts_generator.layout_spec import ASPECT_PRESETS, LayoutSpec, parse_layout_prompt
-from .jobs import STORE, regenerate_seo
+from .jobs import STORE, regenerate_seo, rename_to_title
 
 STATIC_DIR = Path(__file__).parent / "static"
 UPLOAD_DIR = Path("webapp_uploads")
@@ -745,7 +745,17 @@ async def trim_clip(job_id: str, filename: str, req: TrimRequest) -> dict:
         except Exception as e:
             raise HTTPException(500, f"Could not mute that clip: {e}")
 
-    new_name = os.path.basename(new_path)
+    # The old render is dead weight once the re-cut exists, and clearing it
+    # first frees its name: a re-cut of "My Title.mp4" should be called
+    # "My Title.mp4" again, not pushed to "My Title_2.mp4" by its own predecessor.
+    if old_path.name != os.path.basename(new_path):
+        with contextlib.suppress(OSError):
+            old_path.unlink()
+
+    seo = clip.get("seo") or {}
+    new_name = rename_to_title(Path(job.out_dir), os.path.basename(new_path),
+                               seo.get("title") or clip.get("title") or "")
+
     updated = STORE.replace_clip(job, clip["file"], {
         "file": new_name,
         "url": f"/api/jobs/{job.id}/clips/{new_name}",
@@ -755,11 +765,6 @@ async def trim_clip(job_id: str, filename: str, req: TrimRequest) -> dict:
         "muted": bool(req.mute),
         "edited": True,
     })
-
-    # The old render is dead weight once the new one is in the list.
-    if old_path.name != new_name:
-        with contextlib.suppress(OSError):
-            old_path.unlink()
 
     return updated or {}
 
