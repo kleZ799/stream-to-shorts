@@ -228,7 +228,30 @@
       </div>
       <p class="lead">Ranked best first — #1 is the one to post today. Click any clip to
         play it, trim it, or copy the title, description and tags to upload it with.</p>
+
+      <div class="lib-tools">
+        <div class="lib-find">
+          <svg><use href="#i-search"/></svg>
+          <input type="text" id="libQ" autocomplete="off" spellcheck="false"
+                 placeholder="Search your clips — title, hook, tag or video">
+          <button class="search-clear hidden" id="libQClear" title="Clear">
+            <svg><use href="#i-close"/></svg></button>
+        </div>
+        <div class="lib-when" id="libWhen">
+          <button class="chip on" data-when="all">Any time</button>
+          <button class="chip" data-when="1">Today</button>
+          <button class="chip" data-when="7">This week</button>
+          <button class="chip" data-when="30">This month</button>
+        </div>
+      </div>
+      <p class="lib-count hidden" id="libCount"></p>
+
       <div class="runs" id="clips"></div>
+      <div class="lib-empty hidden" id="libEmpty">
+        <svg><use href="#i-search"/></svg>
+        <p>No clips match that.</p>
+        <button class="btn ghost sm" id="libReset">Clear the filters</button>
+      </div>
     </section>
 
     <!-- help -->

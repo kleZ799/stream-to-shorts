@@ -803,6 +803,70 @@ label.fld > span a:hover { text-decoration: underline; }
   word-break: break-word;
 }
 
+/* ======================= library filters ======================= */
+/* A library built up over weeks needs a way in. The search reads every field
+   a clip carries — its title, its hook, its tags, the video it came from —
+   because you rarely remember which one of those you remember it by. */
+.lib-tools {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.lib-find {
+  flex: 1 1 260px;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 38px;
+  padding: 0 6px 0 14px;
+  background: #121212;
+  border: 1px solid var(--line);
+  border-radius: var(--pill);
+  transition: border-color var(--fast), box-shadow var(--fast), background var(--fast);
+}
+.lib-find:focus-within {
+  border-color: var(--blue);
+  background: #0c0c0c;
+  box-shadow: inset 0 0 0 1px rgba(62, 166, 255, .35);
+}
+.lib-find > svg { width: 18px; height: 18px; flex: 0 0 auto; color: var(--text-3); }
+.lib-find input {
+  flex: 1;
+  min-width: 0;
+  background: none;
+  border: 0;
+  outline: none;
+  color: var(--text);
+  font: 400 14px/1 inherit;
+}
+.lib-find input::placeholder { color: var(--text-3); }
+
+.lib-when { display: flex; gap: 8px; flex-wrap: wrap; }
+.lib-when .chip { height: 30px; font-size: 13px; }
+
+.lib-count {
+  color: var(--text-3);
+  font-size: 12.5px;
+  margin: -6px 0 14px;
+}
+
+.lib-empty {
+  padding: 44px 20px;
+  text-align: center;
+  color: var(--text-2);
+}
+.lib-empty svg { width: 34px; height: 34px; color: var(--text-3); margin-bottom: 10px; }
+.lib-empty p { margin-bottom: 14px; font-size: 14px; }
+
+/* A run whose clips were all filtered out. Hidden rather than shown empty,
+   so the grid never has a heading with nothing under it. */
+.run.filtered-out { display: none; }
+
+
 /* ============================ runs ============================ */
 /* One group per render, newest first. The heading says which video the clips
    under it came from, so a library built up over weeks stays readable. */

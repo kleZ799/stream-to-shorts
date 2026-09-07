@@ -34,6 +34,10 @@ let jobId = null;
 let runs = [];           // every run still on disk, newest first
 let clips = [];          // those runs' clips, flattened in display order
 let cur = -1;            // index of the clip in the player
+let shown = [];          // indices into `clips` currently on screen, in order
+let libQ = "";           // library search text
+let libWhen = "all";     // library date window: all | 1 | 7 | 30
+let libTimer = null;
 let trim = null;         // { lo, hi, start, end }
 let confirmFn = null;
 
@@ -827,10 +831,42 @@ async function loadLibrary() {
     if (r.shorts_dir && c.file) {
       c.path = r.shorts_dir + (r.shorts_dir.includes("\\") ? "\\" : "/") + c.file;
     }
+    c._hay = haystack(c, r);
     clips.push(c);
   }));
+  reindex();
   renderClips();
   return clips.length;
+}
+
+// Every card carries its own position in `clips`, so filtering the grid can
+// never make a card open the wrong clip. Anything that reorders or removes
+// from `clips` has to call this.
+function reindex() {
+  clips.forEach((c, i) => { c._i = i; });
+}
+
+// Everything a clip could be remembered by. You rarely recall which field the
+// phrase you are searching for actually lives in, so they all match.
+function haystack(c, r) {
+  const seo = c.seo || {};
+  return [
+    c.title, seo.title, seo.description, seo.hook_text,
+    c.hook_sentence, c.first_line, c.virality_reason,
+    (seo.tags || []).join(" "), (seo.hashtags || []).join(" "),
+    c.file, r && r.source_title,
+  ].filter(Boolean).join(" ").toLowerCase();
+}
+
+// Was this run made inside the selected window? "Today" is the calendar day,
+// not the last 24 hours — a clip made last night is not one you made today.
+function inWindow(ts) {
+  if (libWhen === "all") return true;
+  if (!ts) return false;
+  const made = new Date(ts * 1000);
+  const days = Number(libWhen);
+  if (days === 1) return made.toDateString() === new Date().toDateString();
+  return Date.now() - made.getTime() <= days * 86400000;
 }
 
 function whenMade(ts) {
@@ -843,7 +879,8 @@ function whenMade(ts) {
   return d.toLocaleDateString();
 }
 
-function clipCard(c, i) {
+function clipCard(c) {
+  const i = c._i;
   const seo = c.seo || null;
   const title = (seo && seo.title) || c.title || "Untitled";
   const sub = (seo && seo.hook_text) || c.hook_sentence
@@ -881,16 +918,30 @@ function renderClips() {
   $("gCount").classList.toggle("hidden", !count);
   $("results").classList.toggle("hidden", !count);
 
-  let i = 0;
+  const terms = libQ.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const filtering = terms.length > 0 || libWhen !== "all";
+  shown = [];
+
   $("clips").innerHTML = runs.map((r) => {
-    const cards = r.clips.map((c) => clipCard(c, i++)).join("");
+    // The date belongs to the run — every clip in it was made at once — while
+    // the search is per clip, so a run can survive on just one of its clips.
+    const keep = inWindow(r.created_at)
+      ? r.clips.filter((c) => terms.every((t) => c._hay.includes(t)))
+      : [];
+    if (!keep.length) return "";
+
+    const cards = keep.map((c) => { shown.push(c._i); return clipCard(c); }).join("");
+    // Counted across the whole run, not the filtered view: the button rewrites
+    // every clip in the run, so it must not promise less than it does.
     const missing = r.clips.filter((c) => !c.seo).length;
     return `
       <section class="run">
         <div class="run-head">
           <div class="run-id">
             <h3>${esc(r.source_title || "Clips from an earlier run")}</h3>
-            <span>${r.clips.length} clip${r.clips.length > 1 ? "s" : ""}
+            <span>${keep.length < r.clips.length
+                ? `${keep.length} of ${r.clips.length} clips`
+                : `${r.clips.length} clip${r.clips.length > 1 ? "s" : ""}`}
               · ${esc(whenMade(r.created_at))}</span>
           </div>
           <div class="run-actions">
@@ -905,6 +956,12 @@ function renderClips() {
         <div class="clips">${cards}</div>
       </section>`;
   }).join("");
+
+  $("libEmpty").classList.toggle("hidden", !count || shown.length > 0);
+  $("libCount").classList.toggle("hidden", !filtering || !shown.length);
+  $("libCount").textContent =
+    `${shown.length} of ${count} clip${count === 1 ? "" : "s"}`;
+  $("libQClear").classList.toggle("hidden", !libQ);
 
   $("clips").querySelectorAll(".clip").forEach((el) => {
     el.onclick = () => openPlayer(+el.dataset.i);
@@ -1103,8 +1160,10 @@ document.addEventListener("keydown", (e) => {
   else if (k === "f") { showClipFile(clips[cur]); }
   else if (e.key === "ArrowRight") { vid.currentTime = Math.min(vid.duration || 0, vid.currentTime + 2); }
   else if (e.key === "ArrowLeft") { vid.currentTime = Math.max(0, vid.currentTime - 2); }
-  else if (e.key === "ArrowDown" && cur < clips.length - 1) { openPlayer(cur + 1); }
-  else if (e.key === "ArrowUp" && cur > 0) { openPlayer(cur - 1); }
+  // Step through what is actually on screen. With a filter applied, the clip
+  // after this one is the next visible card, not the next array entry.
+  else if (e.key === "ArrowDown") { stepClip(1); }
+  else if (e.key === "ArrowUp") { stepClip(-1); }
 });
 
 // ---------------------------------------------------------------- upload metadata
@@ -1343,8 +1402,61 @@ function dropClip(i) {
   if (run) run.clips = run.clips.filter((x) => x !== c);
   runs = runs.filter((r) => r.clips.length);
   clips.splice(i, 1);
+  // Splicing shifts every clip after this one, so the cards' stored positions
+  // are stale until they are handed out again.
+  reindex();
   renderClips();
 }
+
+
+// Move the player `delta` cards along the visible grid. Falls back to the flat
+// list when the clip in the player is not on screen — which is what happens if
+// you filter it out while it is playing.
+function stepClip(delta) {
+  const order = shown.length ? shown : clips.map((_, i) => i);
+  const at = order.indexOf(cur);
+  const next = at === -1 ? cur + delta : order[at + delta];
+  if (next != null && next >= 0 && next < clips.length) openPlayer(next);
+}
+
+
+// ---------------------------------------------------------------- library filters
+
+function applyLibFilters() {
+  renderClips();
+}
+
+$("libQ").addEventListener("input", (e) => {
+  libQ = e.target.value;
+  $("libQClear").classList.toggle("hidden", !libQ);
+  clearTimeout(libTimer);
+  libTimer = setTimeout(applyLibFilters, 120);
+});
+
+$("libQClear").onclick = () => {
+  libQ = "";
+  $("libQ").value = "";
+  $("libQ").focus();
+  applyLibFilters();
+};
+
+$("libWhen").onclick = (e) => {
+  const btn = e.target.closest("[data-when]");
+  if (!btn) return;
+  libWhen = btn.dataset.when;
+  for (const b of $("libWhen").querySelectorAll(".chip")) b.classList.toggle("on", b === btn);
+  applyLibFilters();
+};
+
+$("libReset").onclick = () => {
+  libQ = "";
+  libWhen = "all";
+  $("libQ").value = "";
+  for (const b of $("libWhen").querySelectorAll(".chip")) {
+    b.classList.toggle("on", b.dataset.when === "all");
+  }
+  applyLibFilters();
+};
 
 $("tApply").onclick = async () => {
   const c = clips[cur];
