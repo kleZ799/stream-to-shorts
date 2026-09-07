@@ -73,6 +73,11 @@ Double-click it. On first run it asks for a [free Gemini API key](https://aistud
 Everything below is for running from source, which you only need if you want to
 change how it works.
 
+> 📚 **Want to understand the internals?** [HOW_IT_WORKS.md](HOW_IT_WORKS.md) is a
+> study companion to this repo — the pipeline stage by stage, the ranking prompts,
+> the three renderers, the job runner, the frontend, and why each is built the way
+> it is. Written to be read end-to-end.
+
 ---
 
 ## What I built
