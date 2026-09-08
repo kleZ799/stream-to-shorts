@@ -1267,15 +1267,31 @@ $("seoRedo").onclick = async () => {
   try {
     const d = await api(
       `/api/jobs/${encodeURIComponent(jobOf(c))}/seo?force=true`, { method: "POST" });
-    const mine = (d.clips || []).find((x) => x.file === c.file);
-    if (mine) patchClip(cur, { seo: mine.seo });
+    // Match on index, not on filename. A rewrite renames the mp4 to its new
+    // title, so every x.file coming back is the *new* name -- matching the
+    // old one finds nothing, silently, and leaves the card holding a url
+    // whose file no longer exists. That is a 404, which the <video> reports
+    // as a black frame and MEDIA_ERR_SRC_NOT_SUPPORTED.
+    const fresh = (x) => ({ seo: x.seo, file: x.file, url: x.url, title: x.title });
+    const mine = (d.clips || []).find((x) => x.index === c.index);
+    if (mine) patchClip(cur, fresh(mine));
     // Everything else in that run was rewritten too — take the new copy.
     (d.clips || []).forEach((x) => {
-      const local = clips.find((y) => y.file === x.file && jobOf(y) === jobOf(c));
-      if (local && local !== c) local.seo = x.seo;
+      const local = clips.find((y) => y.index === x.index && jobOf(y) === jobOf(c));
+      if (local && local !== c) Object.assign(local, fresh(x));
     });
     renderClips();
     renderSeo();
+    // The open <video> keeps whatever src it was rendered with, so a rename
+    // has to be pushed onto the element by hand -- same as the trim path.
+    if (mine) {
+      const at = vid.currentTime, playing = !vid.paused;
+      vid.src = `${mine.url}?v=${Date.now()}`;
+      vid.currentTime = at;
+      if (playing) vid.play().catch(() => {});
+      $("pDownload").href = mine.url;
+      $("pDownload").setAttribute("download", mine.file);
+    }
     $("pTitle").textContent = (clips[cur].seo && clips[cur].seo.title) || clips[cur].title;
     toast("Rewritten.");
   } catch (e) {
