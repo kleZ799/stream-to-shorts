@@ -469,14 +469,27 @@ class JobStore:
 
         for pattern, stage in _PREFIX_STAGE:
             if re.match(pattern, line):
-                # "[stack] 2/5: ..." gives exact render progress.
-                m = re.search(r"\b(\d+)\s*/\s*(\d+)\b", line)
+                # "[stack] 2/5: ..." gives exact render progress, and
+                # "[highlights] chunk 2/12" gives the same for a chunked
+                # rank. The rank pattern has to name "chunk": that stage
+                # also logs "(attempt 1/5)" while retrying a 503, and a
+                # bare N/M search would read a retry as progress and walk
+                # the bar backwards.
+                if stage == "render":
+                    m = re.search(r"\b(\d+)\s*/\s*(\d+)\b", line)
+                elif stage == "rank":
+                    m = re.search(r"\bchunk\s+(\d+)\s*/\s*(\d+)\b", line)
+                else:
+                    m = None
                 frac = None
-                if m and stage == "render":
+                message = _STAGE_LABELS.get(stage, stage)
+                if m:
                     done, total = int(m.group(1)), int(m.group(2))
                     frac = (done - 1) / max(1, total)
-                self._update(job, stage=stage, frac=frac,
-                             message=_STAGE_LABELS.get(stage, stage))
+                    # A twelve-chunk rank holds one stage for minutes.
+                    # Without the counter the label reads as a hang.
+                    message = f"{message} ({done}/{total})"
+                self._update(job, stage=stage, frac=frac, message=message)
                 break
 
     def _run_forever(self) -> None:
