@@ -1914,3 +1914,13 @@ body.player-on .player-body { transform: none; }
   box-shadow: 0 0 0 2px var(--bg);
 }
 .ibtn .dot.hidden { display: none; }
+
+/* The build number, where someone reporting a bug can actually find it. */
+.w-ver {
+  font-size: 11px;
+  color: var(--text-3);
+  padding: 2px 7px;
+  border-radius: var(--pill);
+  background: rgba(255, 255, 255, .06);
+}
+.g-ver { margin: -8px 12px 12px; font-size: 10.5px; color: var(--text-3); }
