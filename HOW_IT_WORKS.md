@@ -1,6 +1,6 @@
 # How Stream → Shorts works
 
-By **Parth Bhadana** — [YouTube](https://www.youtube.com/@ParthBhadana799) · [GitHub](https://github.com/kleZ799) · [LinkedIn](https://www.linkedin.com/in/parth-bhadana-530014202/)
+By **Parth Bhadana** — [YouTube](https://www.youtube.com/@ParthBhadana799) · [GitHub](https://github.com/kleZ799) · [LinkedIn](https://www.linkedin.com/in/parth-bhadana-530014202/) · [Discord](https://discord.gg/jnMrGbBz3m)
 
 > **📚 Study document.** This is a learning and reference companion to the
 > codebase — written to be read end-to-end so the whole system can be explained
@@ -1758,7 +1758,7 @@ considers worth clipping at all.
 
 **Parth Bhadana**
 
-[YouTube](https://www.youtube.com/@ParthBhadana799) &middot; [GitHub](https://github.com/kleZ799) &middot; [LinkedIn](https://www.linkedin.com/in/parth-bhadana-530014202/)
+[YouTube](https://www.youtube.com/@ParthBhadana799) &middot; [GitHub](https://github.com/kleZ799) &middot; [LinkedIn](https://www.linkedin.com/in/parth-bhadana-530014202/) &middot; [Discord](https://discord.gg/jnMrGbBz3m)
 
 Built and maintained by me. If you use it, fork it, or ship anything based on
 it, the MIT licence asks one thing in return: keep the copyright notice.

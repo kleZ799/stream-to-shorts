@@ -1,6 +1,6 @@
 # The concepts behind Stream → Shorts
 
-By **Parth Bhadana** — [YouTube](https://www.youtube.com/@ParthBhadana799) · [GitHub](https://github.com/kleZ799) · [LinkedIn](https://www.linkedin.com/in/parth-bhadana-530014202/)
+By **Parth Bhadana** — [YouTube](https://www.youtube.com/@ParthBhadana799) · [GitHub](https://github.com/kleZ799) · [LinkedIn](https://www.linkedin.com/in/parth-bhadana-530014202/) · [Discord](https://discord.gg/jnMrGbBz3m)
 
 **What this document is for.** [HOW_IT_WORKS.md](HOW_IT_WORKS.md) explains *this
 codebase*. This one explains the *ideas* the codebase is made of — the AI/ML and
@@ -755,7 +755,7 @@ Ordered by value, with the reasoning that makes each defensible:
 
 **Parth Bhadana**
 
-[YouTube](https://www.youtube.com/@ParthBhadana799) &middot; [GitHub](https://github.com/kleZ799) &middot; [LinkedIn](https://www.linkedin.com/in/parth-bhadana-530014202/)
+[YouTube](https://www.youtube.com/@ParthBhadana799) &middot; [GitHub](https://github.com/kleZ799) &middot; [LinkedIn](https://www.linkedin.com/in/parth-bhadana-530014202/) &middot; [Discord](https://discord.gg/jnMrGbBz3m)
 
 Built and maintained by me. If you use it, fork it, or ship anything based on
 it, the MIT licence asks one thing in return: keep the copyright notice.

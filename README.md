@@ -17,6 +17,7 @@ transcription and ranking both run locally.
 &nbsp;·&nbsp; [YouTube](https://www.youtube.com/@ParthBhadana799)
 &nbsp;·&nbsp; [GitHub](https://github.com/kleZ799)
 &nbsp;·&nbsp; [LinkedIn](https://www.linkedin.com/in/parth-bhadana-530014202/)
+&nbsp;·&nbsp; [Discord](https://discord.gg/jnMrGbBz3m)
 
 **No Python. No ffmpeg. Nothing to install.** Double-click and go.
 
@@ -520,7 +521,7 @@ packaging — is mine.
 
 **Parth Bhadana**
 
-[YouTube](https://www.youtube.com/@ParthBhadana799) &middot; [GitHub](https://github.com/kleZ799) &middot; [LinkedIn](https://www.linkedin.com/in/parth-bhadana-530014202/)
+[YouTube](https://www.youtube.com/@ParthBhadana799) &middot; [GitHub](https://github.com/kleZ799) &middot; [LinkedIn](https://www.linkedin.com/in/parth-bhadana-530014202/) &middot; [Discord](https://discord.gg/jnMrGbBz3m)
 
 Built and maintained by me. If you use it, fork it, or ship anything based on
 it, the MIT licence asks one thing in return: keep the copyright notice.

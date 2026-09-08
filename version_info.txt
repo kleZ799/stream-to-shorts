@@ -34,7 +34,8 @@ VSVersionInfo(
           StringStruct('Comments',
                        'Built by Parth Bhadana. '
                        'youtube.com/@ParthBhadana799 | github.com/kleZ799 | '
-                       'linkedin.com/in/parth-bhadana-530014202'),
+                       'linkedin.com/in/parth-bhadana-530014202 | '
+                       'discord.gg/jnMrGbBz3m'),
         ])
     ]),
     VarFileInfo([VarStruct('Translation', [1033, 1200])])
