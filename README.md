@@ -29,6 +29,8 @@ transcription and ranking both run locally.
 
 <img src="assets/screenshots/01-create.png" alt="The create screen: a layout prompt on the left, a live 9:16 preview on the right" width="880">
 
+<img src="assets/screenshots/00-welcome.png" alt="The launch card: what the app is, who made it, links to the channel, repo, Discord and email, and a donate button" width="640">
+
 </div>
 
 ---
@@ -71,6 +73,28 @@ told which stage it's on, because a three-hour VOD is not a two-second wait.
 
 <img src="assets/screenshots/02-progress.png" alt="A job mid-run, transcribing at 42%, with the log open" width="880">
 
+### It updates itself
+
+The app is one .exe people download once, so a fix that ships is a fix that has
+to reach them. It asks GitHub for the newest release at launch, again every
+half hour while it is open, and whenever you come back to the window — so a
+build published at noon reaches someone who started work at nine, without
+restarting anything.
+
+When there is one, a banner offers it. The download is checked against the
+SHA-256 GitHub publishes for that file, the running exe is replaced in place,
+and the app reopens on the new version. Same folder, same filename, and the
+build it replaced is deleted rather than left sitting on your disk. Nothing is
+touched until the checksum matches, so a failed download leaves the working
+app exactly as it was.
+
+There is a **Check for updates** button in the top bar and in the sidebar, and
+the version you are running is shown in all three places, for when something
+has gone wrong and you need to say which build you are on.
+
+> Builds before v1.5.0 were compiled before any of this existed and cannot be
+> told about new versions. Those need one manual download — the last one.
+
 ### Clips come back ranked
 
 Each card carries its score and the exact span it was cut from.
@@ -93,6 +117,9 @@ rendered file.
 [**⬇ Download StreamToShorts.exe**](https://github.com/kleZ799/stream-to-shorts/releases/latest/download/StreamToShorts.exe) — 229 MB, Windows, self-contained.
 
 Double-click it. On first run it asks for a [free Gemini API key](https://aistudio.google.com/apikey), which is stored only on your machine.
+
+**This is the only time you download by hand.** From v1.5.0 the app updates
+itself: it notices new releases, checks them, and replaces itself in place.
 
 <details>
 <summary>First-run details</summary>
@@ -439,6 +466,21 @@ stdout, so the runner captures it line by line, maps prefixes like `[transcribe]
 or `[stack] 2/5` onto stages, and gives each stage a band of the bar. A render
 that reports `3/5` moves the bar to the right place inside the render band
 without the pipeline knowing a UI exists.
+
+**Updating replaces the running exe with itself.** Windows will not let a
+running .exe be overwritten, but it will let it be *renamed* — so the running
+file is moved aside, the verified download takes its name, and the app
+relaunches from the same path. The rename happens only after the SHA-256
+matches, so a bad download never becomes the thing that runs; if the second
+move fails the original is put straight back. The replaced build cannot be
+deleted immediately — the process that was running it is still shutting down
+and still holding it open — so cleanup retries in the background until the
+handover completes.
+
+The page never handles a download URL. It asks the server to install *the*
+update, and the server resolves what that means from the repository compiled
+into the build, so nothing rendered in the window can aim the updater at a file
+of its choosing.
 
 **Editing re-cuts from the source, not the render.** Trimming a clip re-runs the
 renderer over the original download with new timestamps, which is why the span

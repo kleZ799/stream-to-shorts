@@ -1517,6 +1517,112 @@ are separate artifacts — one build run refreshes only one of them.
 
 ---
 
+## 16b. Shipping updates to an installed .exe
+
+Packaging solves getting the app onto a machine once. It does nothing about the
+second time. The exe is a single unsigned file someone downloads and keeps, so
+without a way to reach it, every fix written after their download is a fix they
+never receive — and asking someone to re-fetch 229 MB by hand is a step most
+will not take twice.
+
+`webapp/updater.py` is the whole mechanism. Three problems, each with a
+constraint worth understanding.
+
+### Knowing there is something new
+
+The check reads GitHub's releases API for the repository compiled into the
+build, compares the newest tag against `APP_VERSION`, and reports one of four
+states: `current`, `update`, `ahead`, or `unavailable`.
+
+`ahead` exists because the first version of this collapsed "a newer release
+exists" and "this build is newer than the last release" into one branch, and
+produced a message telling someone on the newest build to install an older one.
+A development build is a normal thing to be running; it is not an update.
+
+Checks run at launch, every thirty minutes while the window is open, and on
+window focus, with a ten-minute floor so a window being focused repeatedly does
+not become a stream of requests. Unauthenticated GitHub allows sixty calls an
+hour; this uses two.
+
+Failure is silent by design. Offline, rate-limited, or no releases yet all
+return a quiet "nothing to report" rather than an error, because an app that
+cannot reach GitHub is still a working app.
+
+### Trusting what comes back
+
+The releases API publishes a SHA-256 for each asset. The download is hashed as
+it streams and compared before anything is replaced; a mismatch or a missing
+digest fails closed and deletes the partial file.
+
+This is integrity, not authorship — the exe is unsigned, so it proves the file
+matches what the API described, not who built it. Without a code-signing
+certificate that is the strongest available check.
+
+Two smaller boundaries matter as much. Every URL is checked against an
+allowlist of GitHub's own hosts, before the request and again after redirects,
+so a lookalike domain in an API response goes nowhere. And the page never
+handles a URL at all: it asks the server to install *the* update, and the
+server resolves what that means itself. Anything rendered in the window is
+therefore unable to aim the updater at a file of its choosing.
+
+### Replacing a file that is currently running
+
+Windows will not let a running `.exe` be overwritten. It will let it be
+**renamed**. So:
+
+```
+download  -> .update-xxxx.part   (beside the exe, not in %TEMP%:
+                                  a rename only works within one volume)
+verify    -> SHA-256 must match, or stop here
+rename    -> StreamToShorts.exe  -> StreamToShorts.exe.old-version
+move      -> .update-xxxx.part   -> StreamToShorts.exe
+relaunch  -> detached, from the same path
+exit      -> 1.5s later, so the reply reaches the browser first
+```
+
+Ordering is the safety property. Nothing is touched until the hash matches, and
+if the second move fails the original is put straight back — the failure mode
+is "you are still on the version you had", never "you have no app".
+
+Cleanup is the part that looks trivial and is not. The replaced build cannot
+simply be deleted by the new process: the old one is still shutting down and
+still holding its own file open, so the delete fails. The first version of this
+swallowed that error and left 229 MB on disk until the app happened to be
+started a second time. It now retries on a background thread until the handover
+completes, and sweeps abandoned `.part` files at the same time.
+
+The staged file is also deleted explicitly after the move rather than trusting
+the move to consume it. `os.replace` is documented to rename, and was observed
+on one volume to satisfy the request by copying and leaving the source — which
+stranded a full-size duplicate next to the exe it had just become.
+
+### What cannot self-update
+
+Only the one-file build. The one-folder build is hundreds of files, and
+swapping those under a running process is a different and far more fragile
+problem, so it reports the new version and links to the releases page instead.
+The two are told apart by where `sys._MEIPASS` points: a one-file build unpacks
+to a temp directory far from the exe, a one-folder build unpacks nowhere and
+`_MEIPASS` is the `_internal` folder beside it.
+
+And nothing can update a build that shipped before this code existed. Every
+release up to v1.4.0 has no updater in it and never will — those installs need
+one manual download to reach v1.5.0, after which they are self-maintaining.
+
+### Where the version lives
+
+`shorts_generator/version.py` holds `APP_VERSION`, and `build_exe.py` refuses
+to build when `version_info.txt` disagrees with it. The release workflow checks
+the git tag against it too, before building and again after.
+
+Three guards for one number is not excessive here. The updater compares the
+newest release tag against the version compiled into the running build, so a
+build that reports the wrong number offers every user an update to the version
+they already have, installs it, reports the wrong number again, and offers it
+once more.
+
+---
+
 ## 17. Rough edges and known limits
 
 Everything in this section is true of the code as it stands. An earlier draft of
@@ -1607,6 +1713,16 @@ is now `MAX_TRIM_SECONDS`.
 All routes bind `127.0.0.1`. There is no authentication — binding `0.0.0.0`
 exposes an unauthenticated service where every job spends the host's API quota
 and CPU, and `webapp/__main__.py` prints a warning when you do.
+
+### Version and updates
+
+| Route | Purpose |
+|---|---|
+| `GET /api/version` | The running build's version. Local only, never touches the network, so the number is there when GitHub is not |
+| `GET /api/update/check` | Asks GitHub for the newest release. Returns `current` / `update` / `ahead` / `unavailable`, and never the download URL |
+| `POST /api/update/install` | Starts the download. Takes no arguments — the server resolves which file to fetch for itself |
+| `GET /api/update/progress` | Bytes done, total, and state: `downloading` / `verifying` / `ready` / `failed` |
+| `POST /api/update/apply` | Swaps the verified build in and relaunches. The process exits ~1.5s after replying |
 
 ### Setup and settings
 

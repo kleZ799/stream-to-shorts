@@ -625,6 +625,65 @@ scope** rather than thread scope.
 
 ---
 
+## 12b. CS: software distribution and self-update
+
+**The concept.** Getting software onto a machine and keeping it current are
+different problems. Packaging solves the first. The second is only interesting
+when there is no package manager underneath you — and a single unsigned .exe
+someone downloaded from a GitHub release has nothing underneath it at all.
+
+**Where it shows up here.** `webapp/updater.py`.
+
+**Distribution as a trust problem.** Fetching and executing a binary is the
+riskiest thing this app does. Three separate controls, because none is
+sufficient alone:
+
+- *Transport* — HTTPS to hosts on a fixed allowlist, checked before the request
+  and again after redirects.
+- *Integrity* — SHA-256 from the releases API, compared before anything is
+  replaced. This proves the bytes match what the API described. It does not
+  prove who built them; that needs code signing, which needs a certificate.
+- *Authority* — the repository is compiled into the build. The page can ask to
+  install "the update" but cannot say what the update is. Anything rendered in
+  a webview is untrusted input, and the way to keep it from choosing a download
+  target is to never let it name one.
+
+The interview question hiding here is *what does a checksum actually prove?*
+If the server that publishes the file and the server that publishes the hash
+are the same server, a compromise of that server defeats both. It defends
+against corruption and interception, not against the publisher.
+
+**Atomicity under a hostile filesystem.** Windows will not overwrite a running
+executable but will rename one. That single fact shapes the design: rename the
+running file aside, move the verified download into its name, relaunch. The
+ordering gives you the property you want — every failure leaves a working app,
+because nothing is disturbed until the hash matches, and a failed second move
+puts the original back.
+
+**Resource cleanup is where this gets subtle.** The replaced build cannot be
+deleted by the process that replaced it: the old process is still exiting and
+still holds the file. A naive delete fails, and if you swallow the error you
+have silently left a few hundred megabytes on a user's disk. The fix is to
+retry until the handover completes rather than to try once at the wrong moment.
+
+A related trap: `os.replace` is a rename, except when the OS decides to satisfy
+it by copying, at which point the source survives and you have two copies of a
+229 MB file. Not trusting an operation to have the side effect you wanted, and
+checking, costs one syscall.
+
+**Version identity.** The updater compares a tag against a version compiled
+into the binary, which makes those two numbers a single logical value stored in
+three files. Left unenforced, they drift, and the failure is not cosmetic: a
+build that misreports its version offers every user an update to the version
+they are already running, forever. So the build refuses to run when they
+disagree, and CI checks the tag before building and the binary after.
+
+**The bootstrap problem.** No update mechanism can reach the versions that
+shipped before it existed. Those installs are unreachable by construction and
+need one manual download. Worth stating plainly rather than discovering.
+
+---
+
 ## 13. CS: internationalisation
 
 **File:** `webapp/static/i18n.js`
