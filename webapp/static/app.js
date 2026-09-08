@@ -603,6 +603,11 @@ document.querySelectorAll(".w-link[data-open]").forEach((b) => {
 });
 $("wDonate").onclick = () => openExternal("donate");
 
+// Copied rather than handed to a mail client: plenty of Windows installs have
+// no default mail app, and a mailto: that opens nothing looks like a dead
+// button. The clipboard works everywhere and says so.
+$("wMail").onclick = () => copy("parthbhadana57@gmail.com", "Email address copied");
+
 // Tab has to come back round inside the card while it is open, or focus walks
 // off into a page the user cannot see.
 $("welcome").addEventListener("keydown", (e) => {

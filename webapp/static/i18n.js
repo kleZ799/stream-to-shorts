@@ -142,6 +142,9 @@ window.I18N = (function () {
       "Start making Shorts": "Shorts बनाना शुरू करें",
       "Links and credits": "लिंक और क्रेडिट",
       "Support this project — buy me a coffee": "इस प्रोजेक्ट को सपोर्ट करें — एक कॉफ़ी पिलाएँ",
+      "Email": "ईमेल",
+      "Copy": "कॉपी",
+      "Email address copied": "ईमेल पता कॉपी हो गया",
     },
 
     // ---------------------------------------------------------------- Español
@@ -270,6 +273,9 @@ window.I18N = (function () {
       "Start making Shorts": "Empezar a crear Shorts",
       "Links and credits": "Enlaces y créditos",
       "Support this project — buy me a coffee": "Apoya este proyecto: invítame a un café",
+      "Email": "Correo",
+      "Copy": "Copiar",
+      "Email address copied": "Dirección de correo copiada",
     },
 
     // -------------------------------------------------------------- Português
@@ -398,6 +404,9 @@ window.I18N = (function () {
       "Start making Shorts": "Começar a criar Shorts",
       "Links and credits": "Links e créditos",
       "Support this project — buy me a coffee": "Apoie este projeto — pague-me um café",
+      "Email": "E-mail",
+      "Copy": "Copiar",
+      "Email address copied": "Endereço de e-mail copiado",
     },
 
     // --------------------------------------------------------------- Français
@@ -526,6 +535,9 @@ window.I18N = (function () {
       "Start making Shorts": "Commencer à créer des Shorts",
       "Links and credits": "Liens et crédits",
       "Support this project — buy me a coffee": "Soutenir ce projet — offrez-moi un café",
+      "Email": "E-mail",
+      "Copy": "Copier",
+      "Email address copied": "Adresse e-mail copiée",
     },
 
     // ---------------------------------------------------------------- Deutsch
@@ -654,6 +666,9 @@ window.I18N = (function () {
       "Start making Shorts": "Shorts erstellen",
       "Links and credits": "Links und Credits",
       "Support this project — buy me a coffee": "Projekt unterstützen — spendier mir einen Kaffee",
+      "Email": "E-Mail",
+      "Copy": "Kopieren",
+      "Email address copied": "E-Mail-Adresse kopiert",
     },
 
     // ------------------------------------------------------------------ 日本語
@@ -782,6 +797,9 @@ window.I18N = (function () {
       "Start making Shorts": "Shorts を作り始める",
       "Links and credits": "リンクとクレジット",
       "Support this project — buy me a coffee": "このプロジェクトを応援 — コーヒーをおごる",
+      "Email": "メール",
+      "Copy": "コピー",
+      "Email address copied": "メールアドレスをコピーしました",
     },
   };
 

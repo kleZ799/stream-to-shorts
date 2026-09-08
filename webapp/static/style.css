@@ -1787,6 +1787,20 @@ body.player-on .player-body { transform: none; }
 .w-ico.gh { color: var(--text); }
 .w-ico.li { color: #3a95d8; }
 .w-ico.rp { color: var(--warn); }
+.w-ico.ml { color: var(--blue); }
+
+/* Its own row under the four profiles. The address has to stay readable --
+   truncating a contact address to "parthbhadana57@gm..." makes it useless --
+   so it gets the full width rather than half of it. */
+.w-link.wide { grid-column: 1 / -1; }
+.w-copy {
+  margin-left: auto; flex: 0 0 auto;
+  font-size: 10.5px; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--text-3);
+  padding: 4px 9px; border-radius: var(--pill);
+  background: rgba(255, 255, 255, .06);
+}
+.w-link.wide:hover .w-copy { color: var(--text); background: rgba(255, 255, 255, .13); }
 
 .w-txt { display: flex; flex-direction: column; min-width: 0; line-height: 1.3; }
 .w-txt b { font: 600 12.5px/1.3 inherit; }
