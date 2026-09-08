@@ -8,8 +8,47 @@ import re
 from pathlib import Path
 from typing import Dict, List, Optional
 
+import sys
+
 from .. import user_config
 from ..config import LOCAL_OUTPUT_DIR, LOCAL_WHISPER_DEVICE, LOCAL_WHISPER_MODEL
+
+
+def _register_cuda_dlls() -> None:
+    """Put the pip-installed CUDA libraries on Windows' DLL search path.
+
+    nvidia-cublas-cu12 and nvidia-cudnn-cu12 drop their DLLs under
+    site-packages/nvidia/*/bin, which Python 3.8+ does NOT search -- and
+    CTranslate2, unlike torch, never registers them. The result is a GPU that
+    is present, a model that constructs, and an inference call that dies on
+    "cublas64_12.dll is not found". Registering the directories is the whole
+    fix; without it, installing the wheels changes nothing at all.
+
+    Frozen builds keep the same layout under the unpack root, so both are
+    checked. Missing directories are ordinary: a CPU-only install has none,
+    and the caller falls back on its own.
+    """
+    if os.name != "nt" or not hasattr(os, "add_dll_directory"):
+        return
+
+    roots = []
+    try:
+        import nvidia  # type: ignore
+        roots.extend(Path(p) for p in nvidia.__path__)
+    except ImportError:
+        pass
+    bundled = getattr(sys, "_MEIPASS", None)
+    if bundled:
+        roots.append(Path(bundled) / "nvidia")
+
+    for root in roots:
+        for lib in ("cublas", "cudnn", "cuda_nvrtc", "cuda_runtime"):
+            d = root / lib / "bin"
+            if d.is_dir():
+                try:
+                    os.add_dll_directory(str(d))
+                except OSError:
+                    pass    # already registered, or gone between check and use
 
 
 def _cache_candidates(media_path: str) -> List[Path]:
@@ -145,6 +184,8 @@ def _load_srt_cache(cache_path: Path) -> Dict:
 
 
 def _resolve_device() -> str:
+    # Before anything asks whether CUDA works, make sure it *can* work.
+    _register_cuda_dlls()
     if LOCAL_WHISPER_DEVICE != "auto":
         return LOCAL_WHISPER_DEVICE
     try:
@@ -191,6 +232,7 @@ def transcribe_local(media_path: str, language: Optional[str] = None) -> Dict:
                 return cached
 
     try:
+        _register_cuda_dlls()   # the import itself resolves CUDA libraries
         from faster_whisper import WhisperModel  # type: ignore
     except ImportError as e:
         raise RuntimeError(
