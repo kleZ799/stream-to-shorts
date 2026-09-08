@@ -134,6 +134,14 @@ window.I18N = (function () {
       "Open the full player": "पूरा प्लेयर खोलें",
       "Shrink to mini player": "मिनी प्लेयर में छोटा करें",
       "Play / pause": "चलाएँ / रोकें",
+      "Long videos in, vertical Shorts out — every frame of it runs on this PC.": "लंबे वीडियो अंदर, वर्टिकल Shorts बाहर — सब कुछ इसी PC पर चलता है।",
+      "Built by": "निर्माता",
+      "Source code": "सोर्स कोड",
+      "Buy me a coffee": "मुझे एक कॉफ़ी पिलाएँ",
+      "This app is free, and stays free. A coffee pays for the hours that keep it working.": "यह ऐप मुफ़्त है और मुफ़्त ही रहेगा। एक कॉफ़ी इसे चलता रखने वाले घंटों का ख़र्च उठाती है।",
+      "Start making Shorts": "Shorts बनाना शुरू करें",
+      "Links and credits": "लिंक और क्रेडिट",
+      "Support this project — buy me a coffee": "इस प्रोजेक्ट को सपोर्ट करें — एक कॉफ़ी पिलाएँ",
     },
 
     // ---------------------------------------------------------------- Español
@@ -254,6 +262,14 @@ window.I18N = (function () {
       "Open the full player": "Abrir el reproductor completo",
       "Shrink to mini player": "Reducir a mini reproductor",
       "Play / pause": "Reproducir / pausar",
+      "Long videos in, vertical Shorts out — every frame of it runs on this PC.": "Entran vídeos largos, salen Shorts verticales: todo se ejecuta en este PC.",
+      "Built by": "Creado por",
+      "Source code": "Código fuente",
+      "Buy me a coffee": "Invítame a un café",
+      "This app is free, and stays free. A coffee pays for the hours that keep it working.": "Esta app es gratis y seguirá siéndolo. Un café paga las horas que la mantienen en marcha.",
+      "Start making Shorts": "Empezar a crear Shorts",
+      "Links and credits": "Enlaces y créditos",
+      "Support this project — buy me a coffee": "Apoya este proyecto: invítame a un café",
     },
 
     // -------------------------------------------------------------- Português
@@ -374,6 +390,14 @@ window.I18N = (function () {
       "Open the full player": "Abrir o player completo",
       "Shrink to mini player": "Reduzir para o mini player",
       "Play / pause": "Reproduzir / pausar",
+      "Long videos in, vertical Shorts out — every frame of it runs on this PC.": "Entram vídeos longos, saem Shorts verticais — tudo roda neste PC.",
+      "Built by": "Criado por",
+      "Source code": "Código-fonte",
+      "Buy me a coffee": "Pague-me um café",
+      "This app is free, and stays free. A coffee pays for the hours that keep it working.": "Este app é gratuito e continuará sendo. Um café paga as horas que o mantêm funcionando.",
+      "Start making Shorts": "Começar a criar Shorts",
+      "Links and credits": "Links e créditos",
+      "Support this project — buy me a coffee": "Apoie este projeto — pague-me um café",
     },
 
     // --------------------------------------------------------------- Français
@@ -494,6 +518,14 @@ window.I18N = (function () {
       "Open the full player": "Ouvrir le lecteur complet",
       "Shrink to mini player": "Réduire en mini lecteur",
       "Play / pause": "Lecture / pause",
+      "Long videos in, vertical Shorts out — every frame of it runs on this PC.": "Des vidéos longues entrent, des Shorts verticaux sortent — tout tourne sur ce PC.",
+      "Built by": "Créé par",
+      "Source code": "Code source",
+      "Buy me a coffee": "Offrez-moi un café",
+      "This app is free, and stays free. A coffee pays for the hours that keep it working.": "Cette app est gratuite et le restera. Un café paie les heures qui la font tenir.",
+      "Start making Shorts": "Commencer à créer des Shorts",
+      "Links and credits": "Liens et crédits",
+      "Support this project — buy me a coffee": "Soutenir ce projet — offrez-moi un café",
     },
 
     // ---------------------------------------------------------------- Deutsch
@@ -614,6 +646,14 @@ window.I18N = (function () {
       "Open the full player": "Vollen Player öffnen",
       "Shrink to mini player": "Auf Mini-Player verkleinern",
       "Play / pause": "Abspielen / Pause",
+      "Long videos in, vertical Shorts out — every frame of it runs on this PC.": "Lange Videos rein, vertikale Shorts raus — alles läuft auf diesem PC.",
+      "Built by": "Erstellt von",
+      "Source code": "Quellcode",
+      "Buy me a coffee": "Spendier mir einen Kaffee",
+      "This app is free, and stays free. A coffee pays for the hours that keep it working.": "Diese App ist kostenlos und bleibt es. Ein Kaffee bezahlt die Stunden, die sie am Laufen halten.",
+      "Start making Shorts": "Shorts erstellen",
+      "Links and credits": "Links und Credits",
+      "Support this project — buy me a coffee": "Projekt unterstützen — spendier mir einen Kaffee",
     },
 
     // ------------------------------------------------------------------ 日本語
@@ -734,6 +774,14 @@ window.I18N = (function () {
       "Open the full player": "フルプレーヤーを開く",
       "Shrink to mini player": "ミニプレーヤーに縮小",
       "Play / pause": "再生 / 一時停止",
+      "Long videos in, vertical Shorts out — every frame of it runs on this PC.": "長い動画から縦型の Shorts を — すべてこの PC で処理されます。",
+      "Built by": "制作",
+      "Source code": "ソースコード",
+      "Buy me a coffee": "コーヒーをおごる",
+      "This app is free, and stays free. A coffee pays for the hours that keep it working.": "このアプリは無料で、これからも無料です。コーヒー一杯が開発を支えます。",
+      "Start making Shorts": "Shorts を作り始める",
+      "Links and credits": "リンクとクレジット",
+      "Support this project — buy me a coffee": "このプロジェクトを応援 — コーヒーをおごる",
     },
   };
 

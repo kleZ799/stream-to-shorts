@@ -96,7 +96,7 @@
     <div class="g-div"></div>
     <a class="g-item" data-go="secHelp"><svg><use href="#i-help"/></svg><span>How it works</span></a>
     <p class="g-foot">Everything runs on this PC.<br>Nothing is uploaded anywhere.</p>
-    <p class="g-credit">Built by <b>Parth Bhadana</b></p>
+    <button class="g-credit" id="gAbout">Built by <b>Parth Bhadana</b><i>Links and credits</i></button>
   </nav>
 
   <main class="content">
@@ -500,6 +500,55 @@
     <span class="m-title" id="mTitle"></span>
     <button class="ibtn sm" id="mExpand" title="Open the full player"><svg><use href="#i-expand"/></svg></button>
     <button class="ibtn sm" id="mClose" title="Close"><svg><use href="#i-close"/></svg></button>
+  </div>
+</div>
+
+<!-- ============================ welcome ============================ -->
+<!-- Shown on every launch. It is the only place the app introduces itself,
+     so it carries the author's links and the one thing the app ever asks for.
+     Nothing behind it is blocked: it closes on Esc, on the backdrop, and on
+     any of its own buttons. -->
+<div class="welcome" id="welcome" role="dialog" aria-modal="true" aria-labelledby="wTitle" hidden>
+  <div class="w-back" id="wBack"></div>
+  <div class="w-box" role="document">
+    <button class="ibtn sm w-x" id="wClose" title="Close"><svg><use href="#i-close"/></svg></button>
+
+    <div class="w-top">
+      <span class="w-mark"><svg><use href="#i-yt"/></svg></span>
+      <h2 id="wTitle">Stream to <b>Shorts</b></h2>
+      <p class="w-sub">Long videos in, vertical Shorts out &mdash; every frame of it runs on this PC.</p>
+    </div>
+
+    <div class="w-by">
+      <span class="w-by-label">Built by</span>
+      <span class="w-by-name">Parth Bhadana</span>
+    </div>
+
+    <div class="w-links">
+      <button class="w-link" data-open="author-youtube">
+        <span class="w-ico yt"><svg><use href="#i-yt"/></svg></span>
+        <span class="w-txt"><b>YouTube</b><i>@ParthBhadana799</i></span>
+      </button>
+      <button class="w-link" data-open="author-github">
+        <span class="w-ico gh"><svg><use href="#i-github"/></svg></span>
+        <span class="w-txt"><b>GitHub</b><i>kleZ799</i></span>
+      </button>
+      <button class="w-link" data-open="author-linkedin">
+        <span class="w-ico li"><svg><use href="#i-linkedin"/></svg></span>
+        <span class="w-txt"><b>LinkedIn</b><i>Parth Bhadana</i></span>
+      </button>
+      <button class="w-link" data-open="repo">
+        <span class="w-ico rp"><svg><use href="#i-spark"/></svg></span>
+        <span class="w-txt"><b>Source code</b><i>stream-to-shorts</i></span>
+      </button>
+    </div>
+
+    <div class="w-give">
+      <button class="btn donate" id="wDonate"><svg><use href="#i-heart"/></svg><span>Buy me a coffee</span></button>
+      <p class="w-note">This app is free, and stays free. A coffee pays for the hours that keep it working.</p>
+    </div>
+
+    <button class="btn w-go" id="wStart">Start making Shorts</button>
   </div>
 </div>
 

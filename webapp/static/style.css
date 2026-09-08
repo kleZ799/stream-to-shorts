@@ -1123,7 +1123,7 @@ body.drawer-on .drawer { transform: none; }
   transition: opacity var(--med);
 }
 body.player-on .player { opacity: 1; pointer-events: auto; }
-body.player-on, body.drawer-on { overflow: hidden; }
+body.player-on, body.drawer-on, body.welcome-on { overflow: hidden; }
 
 .player-x { position: absolute; top: 16px; right: 18px; z-index: 3; background: rgba(255, 255, 255, .1); }
 
@@ -1636,8 +1636,192 @@ body.player-on .player-body { transform: none; }
 @media (max-width: 1150px) { .brand-who { display: none; } }
 @media (max-width: 900px)  { .brand { display: none; } }
 
+/* A button, not a line of text: this is the only way back to the welcome
+   window once it has been dismissed, so it has to look pressable. */
 .g-credit {
-  margin: 0 12px 14px; font-size: 11px; line-height: 1.5;
+  display: block; width: calc(100% - 24px);
+  margin: 0 12px 14px; padding: 8px 10px;
+  font: 400 11px/1.5 inherit; text-align: left;
   color: var(--text-3, #777);
+  background: none; border: 1px solid transparent; border-radius: var(--r-sm);
+  cursor: pointer;
+  transition: background var(--fast), border-color var(--fast);
 }
-.g-credit b { color: var(--text-2, #aaa); font-weight: 600; }
+.g-credit b { display: block; color: var(--text-2, #aaa); font-weight: 600; }
+.g-credit i { font-style: normal; color: var(--text-3, #717171); }
+.g-credit:hover { background: var(--hover, #272727); border-color: var(--line, #303030); }
+.g-credit:hover b { color: var(--text, #f1f1f1); }
+
+
+/* ============================ welcome window ============================
+   Shown at every launch, so it has to earn the interruption: it says what the
+   app is, who made it, and asks once. Sized to never scroll on a laptop --
+   a startup card that needs scrolling is a card nobody reads. */
+.welcome {
+  position: fixed;
+  inset: 0;
+  z-index: 180;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+}
+.welcome[hidden] { display: none; }
+
+.w-back {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, .72);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  opacity: 0;
+  transition: opacity var(--med);
+}
+.welcome.on .w-back { opacity: 1; }
+
+.w-box {
+  position: relative;
+  width: min(460px, 100%);
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
+  padding: 30px 28px 26px;
+  border-radius: var(--r-lg);
+  border: 1px solid var(--line);
+  background: var(--raised-2);
+  box-shadow: 0 40px 90px rgba(0, 0, 0, .75);
+  opacity: 0;
+  transform: scale(.95) translateY(12px);
+  transition: opacity var(--med), transform var(--med);
+}
+.welcome.on .w-box { opacity: 1; transform: none; }
+
+/* The same aurora the page carries, pooled at the top of the card. */
+.w-box::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 160px;
+  border-radius: var(--r-lg) var(--r-lg) 0 0;
+  pointer-events: none;
+  background:
+    radial-gradient(70% 100% at 20% 0%, rgba(255, 0, 51, .16), transparent 70%),
+    radial-gradient(60% 100% at 85% 0%, rgba(62, 166, 255, .12), transparent 70%);
+}
+.w-box > * { position: relative; }
+
+.w-x { position: absolute; top: 12px; right: 12px; z-index: 2; }
+
+.w-top { text-align: center; margin-bottom: 20px; }
+.w-mark {
+  display: grid; place-items: center;
+  width: 52px; height: 52px; margin: 0 auto 12px;
+  border-radius: 15px;
+  background: var(--red);
+  box-shadow: 0 10px 26px rgba(255, 0, 51, .34);
+}
+.w-mark svg { width: 30px; height: 30px; color: #fff; }
+.w-top h2 { font: 400 21px/1.2 inherit; letter-spacing: -.01em; }
+.w-top h2 b { font-weight: 700; }
+.w-sub {
+  margin: 8px auto 0; max-width: 340px;
+  font-size: 12.5px; line-height: 1.6; color: var(--text-2);
+}
+
+.w-by {
+  display: flex; align-items: baseline; justify-content: center; gap: 7px;
+  padding: 12px 0; margin-bottom: 4px;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+.w-by-label {
+  font-size: 9.5px; letter-spacing: .07em; text-transform: uppercase;
+  color: var(--text-3);
+}
+.w-by-name { font-size: 14px; font-weight: 600; }
+
+/* Two columns on anything roomy, one on a phone-width window. */
+.w-links {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 16px 0 18px;
+}
+/* Held at two columns as long as the labels still read, because stacking
+   them pushes the dismiss button off the bottom of a small window -- a
+   launch card whose only way out needs scrolling is a card that traps. */
+@media (max-width: 380px) { .w-links { grid-template-columns: 1fr; } }
+
+/* Short windows: give up the breathing room rather than the button. */
+@media (max-height: 660px) {
+  .w-box { padding: 22px 22px 18px; }
+  .w-mark { width: 42px; height: 42px; margin-bottom: 9px; }
+  .w-mark svg { width: 24px; height: 24px; }
+  .w-top { margin-bottom: 14px; }
+  .w-top h2 { font-size: 19px; }
+  .w-sub { font-size: 12px; }
+  .w-by { padding: 9px 0; }
+  .w-links { margin: 12px 0 12px; }
+  .w-link { padding: 8px; }
+  .w-give { padding: 12px; margin-bottom: 10px; }
+}
+
+.w-link {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px; min-width: 0;
+  text-align: left;
+  background: var(--raised); border: 1px solid var(--line);
+  border-radius: var(--r); color: var(--text);
+  cursor: pointer;
+  transition: background var(--fast), border-color var(--fast), transform var(--fast);
+}
+.w-link:hover { background: var(--hover); border-color: #454545; }
+.w-link:active { transform: scale(.98); }
+
+.w-ico {
+  display: grid; place-items: center;
+  width: 30px; height: 30px; flex: 0 0 auto;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, .06);
+}
+.w-ico svg { width: 17px; height: 17px; }
+.w-ico.yt { color: var(--red); }
+.w-ico.gh { color: var(--text); }
+.w-ico.li { color: #3a95d8; }
+.w-ico.rp { color: var(--warn); }
+
+.w-txt { display: flex; flex-direction: column; min-width: 0; line-height: 1.3; }
+.w-txt b { font: 600 12.5px/1.3 inherit; }
+.w-txt i {
+  font-style: normal; font-size: 11px; color: var(--text-3);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+.w-give {
+  padding: 15px; margin-bottom: 14px;
+  border-radius: var(--r);
+  border: 1px solid rgba(255, 0, 51, .26);
+  background: rgba(255, 0, 51, .07);
+  text-align: center;
+}
+.btn.donate {
+  width: 100%;
+  justify-content: center;
+  background: var(--red);
+  color: #fff;
+  border: 0;
+}
+.btn.donate:hover { background: #ff2350; }
+.btn.donate svg { width: 17px; height: 17px; }
+.w-note {
+  margin-top: 9px;
+  font-size: 11.5px; line-height: 1.55; color: var(--text-2);
+}
+
+/* Outlined, not filled: the red button above it is the one asking for
+   something, and two solid buttons would leave neither of them leading. */
+.w-go {
+  width: 100%;
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--text);
+}
+.w-go:hover { background: var(--hover); border-color: #454545; }

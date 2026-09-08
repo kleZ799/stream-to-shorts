@@ -556,6 +556,66 @@ $("creditGh").onclick = (e) => { e.preventDefault(); openExternal("author-github
 $("creditLi").onclick = (e) => { e.preventDefault(); openExternal("author-linkedin"); };
 $("creditDonate").onclick = (e) => { e.preventDefault(); openExternal("donate"); };
 
+// ---------------------------------------------------------------- welcome
+//
+// Shown at every launch. Nothing is remembered about it: the app introduces
+// itself and asks once per session, and the sidebar credit opens it again.
+// It is a plain overlay rather than a native dialog because the packaged app
+// runs inside a WebView2 window -- there is nothing else on screen to be
+// modal against, and <dialog>'s own backdrop cannot take the page's blur.
+
+let welcomeReturn = null;   // what to focus once it closes
+
+function openWelcome() {
+  const w = $("welcome");
+  welcomeReturn = document.activeElement;
+  w.hidden = false;
+  // Force layout between unhiding and the class, or the transition has no
+  // starting point and the card just appears. A rAF would do the same, but a
+  // window that is occluded at launch never runs one -- and the failure there
+  // is a fully opaque overlay stuck at zero opacity, blocking a page the user
+  // can still see through it.
+  void w.offsetWidth;
+  w.classList.add("on");
+  body.classList.add("welcome-on");
+  $("wStart").focus();
+}
+
+function closeWelcome() {
+  const w = $("welcome");
+  if (w.hidden) return;
+  w.classList.remove("on");
+  body.classList.remove("welcome-on");
+  // Hide only once it has faded, so the card is not yanked off screen.
+  setTimeout(() => { w.hidden = true; }, 280);
+  if (welcomeReturn && welcomeReturn.focus) welcomeReturn.focus();
+  welcomeReturn = null;
+}
+
+$("wClose").onclick = closeWelcome;
+$("wStart").onclick = closeWelcome;
+$("wBack").onclick = closeWelcome;
+$("gAbout").onclick = openWelcome;
+
+// Same allowlist as the masthead icons -- the button carries a name, not a URL.
+document.querySelectorAll(".w-link[data-open]").forEach((b) => {
+  b.onclick = () => openExternal(b.dataset.open);
+});
+$("wDonate").onclick = () => openExternal("donate");
+
+// Tab has to come back round inside the card while it is open, or focus walks
+// off into a page the user cannot see.
+$("welcome").addEventListener("keydown", (e) => {
+  if (e.key === "Escape") { closeWelcome(); return; }
+  if (e.key !== "Tab") return;
+  const stops = $("welcome").querySelectorAll("button");
+  const first = stops[0], last = stops[stops.length - 1];
+  if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+  else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+});
+
+openWelcome();
+
 // ---------------------------------------------------------------- source
 
 function setSource(src, name) {
@@ -1184,6 +1244,10 @@ $("pScrub").addEventListener("pointerdown", (e) => {
 
 document.addEventListener("keydown", (e) => {
   if (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
+  if (body.classList.contains("welcome-on")) {
+    if (e.key === "Escape") closeWelcome();
+    return;
+  }
   if (!body.classList.contains("player-on")) {
     if (e.key === "Escape" && body.classList.contains("drawer-on")) body.classList.remove("drawer-on");
     return;
