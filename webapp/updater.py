@@ -189,8 +189,12 @@ def check() -> dict:
     state = {
         "current": APP_VERSION,
         "latest": None,
-        "status": "current",     # current | update | rollback | unavailable
+        "status": "current",     # current | update | ahead | unavailable
         "can_install": False,
+        # Direction matters to the wording. Without it the page cannot tell
+        # "a newer build exists" from "you are ahead of the last release",
+        # and announces both as an update.
+        "newer": False,
         "size": 0,
         "notes_url": f"https://github.com/{UPDATE_REPO}/releases/latest",
         "reason": "",
@@ -223,25 +227,35 @@ def check() -> dict:
     state["_digest"] = (asset.get("digest") or "")
 
     cmp = compare(state["latest"], APP_VERSION)
-    if cmp > 0:
-        state["status"] = "update"
-    elif cmp < 0:
-        # Happens when a release is pulled or an older build is re-published.
-        # Offered rather than hidden, because that is how a rollback reaches
-        # the people who already installed the version being withdrawn.
-        state["status"] = "rollback"
-    else:
+    if cmp == 0:
         state["status"] = "current"
         return state
 
+    state["newer"] = cmp > 0
+    if cmp > 0:
+        state["status"] = "update"
+    else:
+        # This build is newer than anything released -- a development build,
+        # or a release that was pulled. Calling that an "update" tells someone
+        # running the newest build to install an older one, which is how the
+        # first version of this message managed to be wrong twice in one
+        # sentence. Installing it is still offered, because re-publishing an
+        # older build is how a bad release gets taken back from the people who
+        # already have it, but it is named for what it is.
+        state["status"] = "ahead"
+
     if not can_self_update():
         state["status"] = "unavailable"
-        state["reason"] = (
-            "Running from source — update with git, not from here."
-            if exe_path() is None else
-            "This is the one-folder build, which cannot replace itself. "
-            "Download the new one instead."
-        )
+        if exe_path() is None:
+            state["reason"] = "Running from source — update with git, not from here."
+        elif cmp > 0:
+            state["reason"] = (
+                f"Version {state['latest']} is out, but this is the one-folder "
+                f"build and it cannot replace itself. Download it instead.")
+        else:
+            state["reason"] = (
+                f"You are on {APP_VERSION}, which is newer than the latest "
+                f"release ({state['latest']}). Nothing to install.")
         return state
 
     state["can_install"] = bool(state["_url"] and state["_digest"])

@@ -634,6 +634,18 @@ $("welcome").addEventListener("keydown", (e) => {
 let updateState = null;
 let updatePoll = null;
 
+// Shown from a local endpoint rather than waiting on the update check, so the
+// build number is there with no network and is the first thing to hand when
+// someone reports a bug.
+async function showVersion() {
+  try {
+    const d = await api("/api/version");
+    $("wVer").textContent = "v" + d.version;
+    $("gVer").textContent = "Version " + d.version;
+  } catch (e) { /* the number is not worth an error */ }
+}
+showVersion();
+
 function fmtMB(bytes) {
   return bytes ? Math.round(bytes / 1e6) + " MB" : "";
 }
@@ -652,17 +664,29 @@ async function checkUpdate(loud) {
     updateState = d;
     renderVersionRow(d);
 
-    const waiting = d.status === "update" || d.status === "rollback";
+    const waiting = d.status === "update";
     $("updateDot").classList.toggle("hidden", !waiting);
     $("gUpdateBadge").classList.toggle("hidden", !waiting);
 
-    if (waiting) {
-      const verb = d.status === "rollback" ? "Roll back to" : "Version";
-      showUpdate(`${verb} ${d.latest} is available`,
-                 `You have ${d.current}. ${fmtMB(d.size)} download.`);
-      $("wuGo").textContent = d.status === "rollback" ? "Roll back now" : "Update now";
+    if (waiting || d.status === "ahead") {
+      const ahead = d.status === "ahead";
+      const verb = ahead ? "Install" : "Version";
+      showUpdate(ahead ? `${verb} ${d.latest}?`
+                       : `${verb} ${d.latest} is available`,
+                 ahead ? `You are on ${d.current}, which is newer. ${fmtMB(d.size)} download.`
+                       : `You have ${d.current}. ${fmtMB(d.size)} download.`);
+      $("wuGo").textContent = ahead ? `Go back to ${d.latest}` : "Update now";
       $("wuGo").disabled = !d.can_install;
       if (!d.can_install && d.reason) $("wuSub").textContent = d.reason;
+    } else if (d.status === "unavailable" && d.newer) {
+      // Only when there is genuinely something newer. This build being ahead
+      // of the last release is not news worth a banner.
+      showUpdate(`Version ${d.latest} is available`, d.reason);
+      $("wuGo").textContent = "Open the releases page";
+      $("wuGo").disabled = false;
+      $("wuGo").onclick = () => openExternal("releases");
+      $("wuNotes").classList.add("hidden");
+      if (loud) openWelcome();
     } else if (loud) {
       toast(d.status === "current"
         ? `You are on the latest version (${d.current}).`

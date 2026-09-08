@@ -876,6 +876,12 @@ def _public(state: dict) -> dict:
     return {k: v for k, v in state.items() if not k.startswith("_")}
 
 
+@app.get("/api/version")
+async def app_version() -> dict:
+    """The running build's version. Local only -- no network, never fails."""
+    return {"version": updater.APP_VERSION, "can_self_update": updater.can_self_update()}
+
+
 @app.get("/api/update/check")
 async def update_check() -> dict:
     return _public(await asyncio.to_thread(updater.check))
