@@ -1,0 +1,209 @@
+"""Every external program this app runs goes through here.
+
+Two problems, one place to solve them.
+
+**No console windows.** A windowed build has no console of its own, so every
+time Windows starts a console program from it — ffmpeg, ffprobe, yt-dlp's own
+ffmpeg calls — it helpfully creates a new one. The result is black windows
+flashing open and shut throughout a run, dozens of them on a long video. People
+reasonably read that as malware, and a tool that looks like malware does not get
+run twice. CREATE_NO_WINDOW stops it.
+
+**Pause.** Rendering saturates the CPU, which is fine until someone wants to use
+their machine for something else. Pausing a job means actually suspending the
+processes doing the work, not just declining to start the next one: ffmpeg holds
+every core it can get, and asking it to stop politely between clips is no help
+to someone whose machine is unusable *now*.
+
+So this module keeps a registry of the children it started, suspends them on
+request, and blocks the worker before it starts another.
+"""
+from __future__ import annotations
+
+import ctypes
+import os
+import signal
+import subprocess
+import sys
+import threading
+from typing import List, Optional
+
+# --- no console windows ---------------------------------------------------
+
+if os.name == "nt":
+    NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+else:
+    NO_WINDOW = 0
+
+
+def _hidden(kwargs: dict) -> dict:
+    """Add the flags that keep a console program from opening a window."""
+    if os.name != "nt":
+        return kwargs
+    kwargs = dict(kwargs)
+    kwargs["creationflags"] = kwargs.get("creationflags", 0) | NO_WINDOW
+    si = kwargs.get("startupinfo") or subprocess.STARTUPINFO()
+    si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    si.wShowWindow = subprocess.SW_HIDE
+    kwargs["startupinfo"] = si
+    return kwargs
+
+
+_patched = False
+
+
+def silence_console_windows() -> None:
+    """Make *every* subprocess in this process start without a window.
+
+    Our own calls go through run() below and do not need this. yt-dlp's do:
+    it spawns ffmpeg itself, from inside a library, with no way to pass
+    creationflags in. Rather than fork it or give up on the worst offender —
+    a download spawns several ffmpeg calls — the default is changed underneath
+    it.
+
+    Deliberately narrow: Windows only, and only when there is no console to
+    inherit, so running from a terminal still behaves normally and nothing
+    about this affects a developer watching output scroll past.
+    """
+    global _patched
+    if _patched or os.name != "nt":
+        return
+    if sys.stdout is not None and sys.stdout.isatty():
+        return          # a real console: leave well alone
+
+    original = subprocess.Popen.__init__
+
+    def patched(self, *args, **kwargs):
+        return original(self, *args, **_hidden(kwargs))
+
+    subprocess.Popen.__init__ = patched
+    _patched = True
+
+
+# --- pause and resume -----------------------------------------------------
+
+_lock = threading.Lock()
+_children: List[subprocess.Popen] = []
+_paused = threading.Event()         # set == paused
+_resume = threading.Event()
+_resume.set()
+
+
+def _suspend_pid(pid: int) -> None:
+    if os.name == "nt":
+        # NtSuspendProcess is the only way to stop a process wholesale on
+        # Windows; there is no SIGSTOP. It is undocumented but has been in
+        # ntdll since NT and is what every process explorer uses.
+        PROCESS_SUSPEND_RESUME = 0x0800
+        handle = ctypes.windll.kernel32.OpenProcess(PROCESS_SUSPEND_RESUME, False, pid)
+        if handle:
+            try:
+                ctypes.windll.ntdll.NtSuspendProcess(handle)
+            finally:
+                ctypes.windll.kernel32.CloseHandle(handle)
+    else:
+        os.kill(pid, signal.SIGSTOP)
+
+
+def _resume_pid(pid: int) -> None:
+    if os.name == "nt":
+        PROCESS_SUSPEND_RESUME = 0x0800
+        handle = ctypes.windll.kernel32.OpenProcess(PROCESS_SUSPEND_RESUME, False, pid)
+        if handle:
+            try:
+                ctypes.windll.ntdll.NtResumeProcess(handle)
+            finally:
+                ctypes.windll.kernel32.CloseHandle(handle)
+    else:
+        os.kill(pid, signal.SIGCONT)
+
+
+def pause() -> bool:
+    """Suspend everything running now, and hold the next thing back."""
+    with _lock:
+        if _paused.is_set():
+            return False
+        _paused.set()
+        _resume.clear()
+        for child in list(_children):
+            if child.poll() is None:
+                try:
+                    _suspend_pid(child.pid)
+                except Exception:
+                    pass        # already gone, or not ours to suspend
+        return True
+
+
+def resume() -> bool:
+    with _lock:
+        if not _paused.is_set():
+            return False
+        for child in list(_children):
+            if child.poll() is None:
+                try:
+                    _resume_pid(child.pid)
+                except Exception:
+                    pass
+        _paused.clear()
+        _resume.set()
+        return True
+
+
+def is_paused() -> bool:
+    return _paused.is_set()
+
+
+def wait_if_paused() -> None:
+    """Block here while paused. Called before starting each child."""
+    _resume.wait()
+
+
+def clear() -> None:
+    """Drop any pause state. Called when a job ends, so the next one is free."""
+    with _lock:
+        _children.clear()
+    _paused.clear()
+    _resume.set()
+
+
+# --- running things -------------------------------------------------------
+
+def run(cmd, *, check: bool = False, capture_output: bool = False,
+        text: Optional[bool] = None, timeout: Optional[float] = None,
+        **kwargs) -> subprocess.CompletedProcess:
+    """subprocess.run, with no console window and honouring pause.
+
+    A paused job stops *before* the next program starts as well as suspending
+    the one already running, so pausing during a five-clip render does not
+    quietly let the remaining four begin.
+    """
+    wait_if_paused()
+
+    popen_kwargs = _hidden(dict(kwargs))
+    if capture_output:
+        popen_kwargs.setdefault("stdout", subprocess.PIPE)
+        popen_kwargs.setdefault("stderr", subprocess.PIPE)
+    if text is not None:
+        popen_kwargs["text"] = text
+
+    proc = subprocess.Popen(cmd, **popen_kwargs)
+    with _lock:
+        _children.append(proc)
+        # A paused job may have started this one in the gap between the wait
+        # above and here. Suspend it immediately rather than letting it run.
+        if _paused.is_set():
+            try:
+                _suspend_pid(proc.pid)
+            except Exception:
+                pass
+    try:
+        out, err = proc.communicate(timeout=timeout)
+    finally:
+        with _lock:
+            if proc in _children:
+                _children.remove(proc)
+
+    result = subprocess.CompletedProcess(cmd, proc.returncode, out, err)
+    if check and proc.returncode != 0:
+        raise subprocess.CalledProcessError(proc.returncode, cmd, out, err)
+    return result

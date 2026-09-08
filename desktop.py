@@ -198,6 +198,17 @@ def main() -> int:
                f"first start can take a moment.", error=False)
         return 0
 
+    # Before anything spawns a child. A windowed build has no console, so
+    # every ffmpeg call Windows starts on its behalf gets a brand new one --
+    # black windows blinking open and shut for the length of a render, which
+    # is what makes a legitimate unsigned exe look like something that should
+    # not be trusted.
+    try:
+        from shorts_generator.proc import silence_console_windows
+        silence_console_windows()
+    except Exception:
+        pass        # cosmetic; never a reason to fail to start
+
     # An update renames the old exe aside rather than deleting it, because it
     # is still running at that moment. This is the first launch where nothing
     # holds it, so this is where it goes.

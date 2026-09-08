@@ -11,6 +11,7 @@ import subprocess
 import time
 from typing import Dict, List, Optional, Tuple
 
+from .. import proc
 from ..config import LOCAL_OUTPUT_DIR, LOCAL_OUTPUT_RESOLUTION
 
 
@@ -54,7 +55,7 @@ def _cut_subclip(source_path: str, start: float, end: float, out_path: str) -> s
         "-c:a", "aac", "-b:a", "128k",
         out_path,
     ]
-    subprocess.run(cmd, check=True)
+    proc.run(cmd, check=True)
     return out_path
 
 
@@ -165,7 +166,7 @@ def _reframe_vertical(in_path: str, out_path: str, aspect_ratio: str,
         "-shortest",
         out_path,
     ]
-    subprocess.run(cmd, check=True)
+    proc.run(cmd, check=True)
     _safe_remove(silent_path)
     return out_path
 

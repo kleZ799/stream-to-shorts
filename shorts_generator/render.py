@@ -9,6 +9,7 @@ import os
 import subprocess
 from typing import Dict, List, Optional
 
+from . import proc
 from .layout_spec import LayoutSpec
 
 
@@ -39,7 +40,7 @@ def _render_center_clip(source_path: str, start: float, end: float, out_path: st
         f"[0:v]crop={crop_w}:{crop_h}:{x}:{y},"
         f"scale={out_w}:{out_h}:flags=lanczos,setsar=1[v]"
     )
-    subprocess.run([
+    proc.run([
         "ffmpeg", "-y", "-loglevel", "error",
         "-ss", f"{start:.3f}", "-i", source_path, "-t", f"{end - start:.3f}",
         "-filter_complex", filt,

@@ -26,6 +26,7 @@ import subprocess
 import tempfile
 from typing import Dict, List, Optional, Tuple
 
+from .. import proc
 from ..config import LOCAL_OUTPUT_DIR
 
 # Fraction of the output height given to the webcam panel.
@@ -46,7 +47,7 @@ SAMPLE_COUNT = 6
 
 
 def _probe_dimensions(source_path: str) -> Tuple[int, int]:
-    out = subprocess.run(
+    out = proc.run(
         ["ffprobe", "-v", "error", "-select_streams", "v:0",
          "-show_entries", "stream=width,height", "-of", "csv=p=0:s=x", source_path],
         capture_output=True, text=True, check=True,
@@ -65,7 +66,7 @@ def _detect_face(source_path: str, timestamp: float, src_w: int, src_h: int,
     )
     with tempfile.TemporaryDirectory() as d:
         frame_path = os.path.join(d, "f.png")
-        subprocess.run(
+        proc.run(
             ["ffmpeg", "-y", "-loglevel", "error", "-ss", f"{timestamp:.3f}",
              "-i", source_path, "-frames:v", "1", frame_path],
             check=True,
@@ -188,7 +189,7 @@ def render_stacked_clip(
         "-movflags", "+faststart",
         out_path,
     ]
-    subprocess.run(cmd, check=True)
+    proc.run(cmd, check=True)
     return {"cam": cam, "game_x": game_x, "cam_panel_h": cam_h}
 
 
