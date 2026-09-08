@@ -31,14 +31,22 @@ def _format_for(fmt: str) -> str:
     """
     fmt = (fmt or "").strip().lower()
     if fmt in ("best", "max", "source", "auto", ""):
+        # Deliberately not restricted to mp4-friendly codecs. Above 1080p
+        # YouTube only offers VP9 and AV1, so demanding H.264 here would
+        # quietly cap "best" at 1080p. The container is what gives instead --
+        # see merge_output_format below.
         return "bestvideo+bestaudio/best"
     try:
         height = int(fmt)
     except ValueError:
         height = 720
     return (
-        f"bestvideo[height<={height}]+bestaudio/"
+        # H.264 video with AAC audio first: that pair goes into an mp4 with a
+        # plain remux, no re-encode and nothing for ffmpeg to refuse. Only if
+        # the video has no such pair does this fall back to whatever exists.
+        f"bestvideo[height<={height}][vcodec^=avc1]+bestaudio[acodec^=mp4a]/"
         f"bestvideo[height<={height}][ext=mp4]+bestaudio[ext=m4a]/"
+        f"bestvideo[height<={height}]+bestaudio/"
         f"best[height<={height}]/best"
     )
 
@@ -276,15 +284,58 @@ def download_youtube_local(video_url: str, fmt: str = "720", out_dir: Optional[s
     ydl_opts = {
         "format": _format_for(fmt),
         "outtmpl": os.path.join(out_dir, f"source_%(id)s{tag}.%(ext)s"),
-        "merge_output_format": "mp4",
+        # "mp4/mkv", not "mp4". yt-dlp merges the separate video and audio
+        # streams by handing them to ffmpeg, and YouTube serves Opus audio
+        # with VP9 and AV1 video. Opus in mp4 is barely supported, so forcing
+        # mp4 makes ffmpeg refuse the merge outright and the whole download
+        # dies with "Postprocessing: Conversion failed!" -- on some videos and
+        # not others, which is a miserable thing to debug from a bug report.
+        #
+        # Naming mkv as the fallback lets those land in a container that
+        # accepts them. Nothing downstream cares: the renderer hands files to
+        # ffmpeg, which reads mkv perfectly well.
+        "merge_output_format": "mp4/mkv",
         "quiet": True,
         "no_warnings": True,
         "noprogress": True,
     }
 
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(video_url, download=True)
-        path = ydl.prepare_filename(info)
+    def _run(opts):
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(video_url, download=True)
+            return ydl.prepare_filename(info), info
+
+    try:
+        path, info = _run(ydl_opts)
+    except Exception as first:
+        # "Postprocessing: Conversion failed!" is yt-dlp reporting that ffmpeg
+        # refused to combine the streams it downloaded, and the reason lives in
+        # ffmpeg's stderr -- which quiet/no_warnings throws away, leaving a bug
+        # report that says only that something failed.
+        #
+        # So: say what we know, then try again without dictating a container.
+        # Asking for a specific one is what usually causes this, and letting
+        # yt-dlp keep the streams in whatever holds them natively costs a
+        # different file extension, which nothing downstream cares about.
+        if "postprocessing" not in str(first).lower():
+            raise
+        print(f"[download/local] merge into mp4 failed: {first}", flush=True)
+        print("[download/local] retrying without forcing a container", flush=True)
+        retry = dict(ydl_opts)
+        retry.pop("merge_output_format", None)
+        retry["quiet"] = False          # let ffmpeg's own reason reach the log
+        retry["no_warnings"] = False
+        try:
+            path, info = _run(retry)
+        except Exception as second:
+            raise RuntimeError(
+                "Could not download this video. ffmpeg would not combine its "
+                "video and audio streams.\n\n"
+                f"First attempt: {first}\n"
+                f"Retry without a forced container: {second}\n\n"
+                "If this happens on every video, ffmpeg is likely missing or "
+                "broken in this install."
+            ) from second
         # merge_output_format may rename the extension after merge
         if not os.path.exists(path):
             stem, _ = os.path.splitext(path)
