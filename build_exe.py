@@ -83,8 +83,17 @@ def main() -> int:
         "--collect-data", "cv2",
         "--collect-data", "yt_dlp",
 
-        # Torch is only needed for CUDA Whisper and adds ~2GB. CPU works fine
-        # without it, so keep it out unless someone deliberately adds it back.
+        # The CUDA runtime libraries, without which the GPU path cannot load.
+        # CTranslate2 finds these by DLL search path, not by import, so they
+        # have to be collected as binaries -- and transcriber.py registers the
+        # directory at runtime. Costs roughly 1.4GB of build, and buys a 5x
+        # faster transcription on any machine with an NVIDIA card. Machines
+        # without one ignore them and fall back to the CPU.
+        "--collect-binaries", "nvidia",
+
+        # Torch is NOT what runs CUDA Whisper -- faster-whisper sits on
+        # CTranslate2, which is collected above. Torch adds ~2GB and buys
+        # nothing here, so it stays out.
         "--exclude-module", "torch",
         "--exclude-module", "matplotlib",
         "--exclude-module", "tkinter",
