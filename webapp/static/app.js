@@ -554,6 +554,7 @@ async function openExternal(what) {
 $("creditYt").onclick = (e) => { e.preventDefault(); openExternal("author-youtube"); };
 $("creditGh").onclick = (e) => { e.preventDefault(); openExternal("author-github"); };
 $("creditLi").onclick = (e) => { e.preventDefault(); openExternal("author-linkedin"); };
+$("creditDonate").onclick = (e) => { e.preventDefault(); openExternal("donate"); };
 
 // ---------------------------------------------------------------- source
 

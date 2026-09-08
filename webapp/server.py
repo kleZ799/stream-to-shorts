@@ -469,6 +469,7 @@ EXTERNAL_LINKS = {
     "author-github": "https://github.com/kleZ799",
     "author-linkedin": "https://www.linkedin.com/in/parth-bhadana-530014202/",
     "repo": "https://github.com/kleZ799/stream-to-shorts",
+    "donate": "https://buymeacoffee.com/parthbhadana",
 }
 
 

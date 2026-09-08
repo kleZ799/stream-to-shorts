@@ -1616,6 +1616,21 @@ body.player-on .player-body { transform: none; }
 .bl#creditYt:hover { color: var(--red, #ff0033); }
 .bl#creditLi:hover { color: #0a66c2; }
 
+/* The one icon here that asks for something rather than pointing somewhere,
+   so it carries colour at rest while the profile links stay grey. It beats
+   twice on hover -- enough to read as a heart, short enough not to nag. */
+.bl.donate { color: var(--red, #ff0033); }
+.bl.donate:hover { color: #ff4d6d; background: rgba(255, 0, 51, .14); }
+.bl.donate:hover svg { animation: beat .7s var(--ease) 2; }
+@keyframes beat {
+  0%, 100% { transform: scale(1); }
+  28%      { transform: scale(1.22); }
+  55%      { transform: scale(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bl.donate:hover svg { animation: none; }
+}
+
 /* Below this the masthead has no room; the sidebar credit still carries the
    name, so the attribution is never lost -- only the icons are. */
 @media (max-width: 1150px) { .brand-who { display: none; } }
