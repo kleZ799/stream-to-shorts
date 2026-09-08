@@ -155,6 +155,17 @@ def _resolve_device() -> str:
             return "cuda"
     except (ImportError, OSError, RuntimeError):
         pass
+
+    # torch is not what runs the model -- faster-whisper sits on CTranslate2,
+    # and this install has no torch at all. Asking the wrong library was
+    # sending a machine with a working GPU down the CPU path and spending
+    # half an hour on a transcript. Ask the engine that does the work.
+    try:
+        import ctranslate2  # type: ignore
+        if ctranslate2.get_cuda_device_count() > 0:
+            return "cuda"
+    except (ImportError, OSError, RuntimeError):
+        pass
     return "cpu"
 
 
@@ -193,8 +204,6 @@ def transcribe_local(media_path: str, language: Optional[str] = None) -> Dict:
 
     from ..config import LOCAL_WHISPER_VAD_FILTER, LOCAL_WHISPER_VAD_PARAMETERS
 
-    model = WhisperModel(LOCAL_WHISPER_MODEL, device=device, compute_type=compute_type)
-
     transcribe_kwargs = {
         "audio": media_path,
         "language": language,
@@ -207,15 +216,38 @@ def transcribe_local(media_path: str, language: Optional[str] = None) -> Dict:
     else:
         transcribe_kwargs["vad_filter"] = False
 
-    segments_iter, info = model.transcribe(**transcribe_kwargs)
+    def _run(dev: str, ct: str):
+        """Transcribe end to end on one device, returning finished segments.
 
-    segments = []
-    for s in segments_iter:
-        segments.append({
-            "start": float(s.start),
-            "end": float(s.end),
-            "text": (s.text or "").strip(),
-        })
+        The whole loop lives in here because CTranslate2 does not fail where
+        you would expect. A CUDA device can count, and a model can construct
+        on it, and the run still dies on the first encode with "Library
+        cublas64_12.dll is not found" -- the GPU is present, the maths library
+        behind it is not. Only draining the generator proves the device works,
+        so the retry has to be able to redo the whole thing.
+        """
+        model = WhisperModel(LOCAL_WHISPER_MODEL, device=dev, compute_type=ct)
+        segments_iter, info = model.transcribe(**transcribe_kwargs)
+        out = []
+        for s in segments_iter:
+            out.append({
+                "start": float(s.start),
+                "end": float(s.end),
+                "text": (s.text or "").strip(),
+            })
+        return out, info
+
+    try:
+        segments, info = _run(device, compute_type)
+    except Exception as e:
+        # The run has already paid for a download. Finish it slowly on the
+        # CPU rather than not at all.
+        if device != "cuda":
+            raise
+        print(f"[transcribe/local] cuda failed ({str(e).splitlines()[0][:120]}); "
+              f"redoing on cpu", flush=True)
+        device, compute_type = "cpu", "int8"
+        segments, info = _run(device, compute_type)
 
     duration = float(getattr(info, "duration", 0.0)) or (segments[-1]["end"] if segments else 0.0)
     print(f"[transcribe/local] {len(segments)} segments, {duration:.0f}s of audio", flush=True)
