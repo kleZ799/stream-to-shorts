@@ -175,7 +175,56 @@ def shorts_dir() -> Path:
     """Where generated clips live, one subfolder per run."""
     d = output_root() / SHORTS_SUBDIR
     d.mkdir(parents=True, exist_ok=True)
+    _write_folder_guide()
     return d
+
+
+_GUIDE_NAME = "READ ME - what is in here.txt"
+
+_GUIDE = """Stream to Shorts keeps everything it makes in this folder.
+
+  shorts
+      Your finished clips, one folder per video, named after that video.
+      This is the folder you want. Each run folder also holds a clips.json,
+      which is how the app remembers titles, scores and spans -- delete it
+      and the clips still play, but the app forgets what they were.
+
+  output
+      The full videos downloaded to cut those clips from, named after the
+      video with its YouTube id in brackets, plus the transcripts made from
+      them (a .json beside each video).
+
+      These are the big files. Deleting them is safe and frees the most
+      space -- clips you have already made are untouched. Re-running the same
+      video downloads it again.
+
+SAFE TO DELETE
+  Anything inside "output". Any run folder inside "shorts" whose clips you no
+  longer want. Settings has a "Clear space" button that does the first of
+  those for you.
+
+BEST LEFT ALONE
+  clips.json inside a run folder, unless you are happy to lose the titles and
+  rankings for those clips.
+
+Nothing here is uploaded anywhere. All of it was made on this PC.
+"""
+
+
+def _write_folder_guide() -> None:
+    """Leave a short note in the output root saying what each folder is.
+
+    People find this folder through Explorer long before they think to look
+    for documentation, and a folder of multi-gigabyte files with no
+    explanation is one people either hoard forever or clear out along with
+    the clips they wanted to keep.
+    """
+    try:
+        guide = output_root() / _GUIDE_NAME
+        if not guide.exists():
+            guide.write_text(_GUIDE, encoding="utf-8")
+    except OSError:
+        pass        # a note is a nicety, never a reason to fail
 
 
 def has_llm_key() -> bool:

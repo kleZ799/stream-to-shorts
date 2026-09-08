@@ -9,6 +9,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 from typing import Dict, List, Optional
 
+from .. import proc
 from ..config import LOCAL_OUTPUT_DIR
 
 
@@ -101,9 +102,8 @@ def _resolve_local_path(source: str) -> Optional[str]:
 
 def _probe_height(path: str) -> int:
     """Video height of a local file, or 0 if ffprobe can't tell us."""
-    import subprocess
     try:
-        out = subprocess.run(
+        out = proc.run(
             ["ffprobe", "-v", "error", "-select_streams", "v:0",
              "-show_entries", "stream=height", "-of", "csv=p=0", path],
             capture_output=True, text=True, check=True,
@@ -118,12 +118,27 @@ def _existing_download(out_dir: str, video_id: str) -> Optional[str]:
 
     Prefers the highest-resolution copy on disk, so asking for better quality
     after a low-quality run doesn't silently hand back the old file.
+
+    Both naming schemes are searched. Downloads are now named after the video
+    with its id in brackets, but anyone upgrading has a folder full of
+    `source_<id>.mp4` from before that, and re-downloading gigabytes because
+    the pattern changed would be a poor way to thank them for updating.
     """
+    # Scanned rather than globbed: a video id can contain - and _, and glob
+    # reads [...] as a character class, so the bracketed form would match
+    # filenames it has no business matching.
     candidates = []
-    for ext in (".mp4", ".mkv", ".webm"):
-        for stem in (f"source_{video_id}", f"source_{video_id}_*"):
-            import glob
-            candidates.extend(glob.glob(os.path.join(out_dir, stem + ext)))
+    try:
+        names = os.listdir(out_dir)
+    except OSError:
+        return None
+    for name in names:
+        stem, ext = os.path.splitext(name)
+        if ext.lower() not in (".mp4", ".mkv", ".webm"):
+            continue
+        if f"[{video_id}]" in stem or stem == f"source_{video_id}" \
+                or stem.startswith(f"source_{video_id}_"):
+            candidates.append(os.path.join(out_dir, name))
 
     best, best_h = None, -1
     for path in sorted(set(candidates)):
@@ -283,7 +298,17 @@ def download_youtube_local(video_url: str, fmt: str = "720", out_dir: Optional[s
     print(f"[download/local] {video_url} @ {fmt} → {out_dir}/", flush=True)
     ydl_opts = {
         "format": _format_for(fmt),
-        "outtmpl": os.path.join(out_dir, f"source_%(id)s{tag}.%(ext)s"),
+        # Named after the video, with the id kept in brackets. "source_dQw4w9
+        # WgXcQ.mp4" tells a person nothing about which video it is, and this
+        # folder fills up with multi-gigabyte files they will eventually want
+        # to sort through and delete. The id stays because the cache lookup
+        # needs it, and because two videos can share a title.
+        #
+        # restrictfilenames is off deliberately -- it strips non-ASCII, which
+        # would reduce a Hindi or Japanese title to nothing. yt-dlp already
+        # replaces characters the filesystem rejects.
+        "outtmpl": os.path.join(out_dir, f"%(title).80B [%(id)s]{tag}.%(ext)s"),
+        "windowsfilenames": True,
         # "mp4/mkv", not "mp4". yt-dlp merges the separate video and audio
         # streams by handing them to ffmpeg, and YouTube serves Opus audio
         # with VP9 and AV1 video. Opus in mp4 is barely supported, so forcing
