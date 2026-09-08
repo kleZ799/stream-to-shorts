@@ -13,6 +13,12 @@ transcription and ranking both run locally.
 [![Download](https://img.shields.io/badge/⬇_Download_for_Windows-229_MB-ff0033?style=for-the-badge)](https://github.com/kleZ799/stream-to-shorts/releases/latest/download/StreamToShorts.exe)
 [![License](https://img.shields.io/badge/license-MIT-green?style=for-the-badge)](LICENSE)
 
+<!-- These read GitHub live, so a new release renames them on its own and
+     there is no version number in this file to go stale. -->
+[![Latest version](https://img.shields.io/github/v/release/kleZ799/stream-to-shorts?style=flat-square&label=latest%20build&color=ff0033)](https://github.com/kleZ799/stream-to-shorts/releases/latest)
+[![Released](https://img.shields.io/github/release-date/kleZ799/stream-to-shorts?style=flat-square&label=released&color=555)](https://github.com/kleZ799/stream-to-shorts/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/kleZ799/stream-to-shorts/total?style=flat-square&label=downloads&color=555)](https://github.com/kleZ799/stream-to-shorts/releases)
+
 **Built by [Parth Bhadana](https://github.com/kleZ799)**
 &nbsp;·&nbsp; [YouTube](https://www.youtube.com/@ParthBhadana799)
 &nbsp;·&nbsp; [GitHub](https://github.com/kleZ799)
