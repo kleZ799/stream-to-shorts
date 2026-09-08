@@ -739,6 +739,7 @@ async function run() {
       source: source.source,
       prompt: $("prompt").value,
       download_format: $("format").value,
+      language: $("spokenLang").value,
       aspect_ratio: aspectChoice || null,
     }));
   } catch (e) {

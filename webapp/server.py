@@ -52,7 +52,11 @@ class JobRequest(BaseModel):
     prompt: str = ""
     num_clips: Optional[int] = None
     download_format: str = "best"
-    language: Optional[str] = None
+    # English rather than None. Left to auto-detect, whisper drifts on game
+    # audio and music beds and starts emitting fluent nonsense in whatever
+    # language it guessed -- a 3h47m English stream came back 703 of 1097
+    # cues in Korean. "auto" is still available for genuinely mixed sources.
+    language: Optional[str] = "en"
     use_llm: bool = True
     aspect_ratio: Optional[str] = None
 

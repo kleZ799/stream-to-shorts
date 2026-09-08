@@ -574,7 +574,12 @@ class JobStore:
                 return
 
             self._update(job, stage="transcribe", message=_STAGE_LABELS["transcribe"])
-            transcript = transcribe_local(source_path, language=job.language)
+            # "auto" is the one value that means "let whisper decide"; every
+            # other value pins it, so a stream in one language cannot drift
+            # into another halfway through.
+            spoken = (job.language or "").strip().lower()
+            transcript = transcribe_local(
+                source_path, language=None if spoken in ("", "auto") else spoken)
             if not transcript["segments"]:
                 raise RuntimeError(
                     "No speech found in this video — nothing to build clips from."
