@@ -33,7 +33,22 @@ def main() -> int:
     ap.add_argument("--onefile", action="store_true",
                     help="Single .exe instead of a folder (slower first launch)")
     ap.add_argument("--clean", action="store_true", help="Wipe build/ and dist/ first")
+    ap.add_argument("--cuda", dest="cuda", action="store_true", default=None,
+                    help="Bundle the CUDA runtime (~2GB). Default for --onedir.")
+    ap.add_argument("--no-cuda", dest="cuda", action="store_false",
+                    help="Leave the CUDA runtime out. Default for --onefile.")
     args = ap.parse_args()
+
+    # The two builds want opposite answers here, so the default depends on
+    # which one is being made -- and saying it out loud beats letting them
+    # drift apart by accident.
+    #
+    # A onedir build is unpacked already, so 2GB of CUDA costs disk and
+    # nothing else. A onefile build re-extracts its entire payload to a temp
+    # directory on EVERY launch, so the same 2GB is paid, as startup latency,
+    # by every user on every run -- including the majority with no NVIDIA card
+    # who cannot use it at all.
+    use_cuda = (not args.onefile) if args.cuda is None else args.cuda
 
     try:
         import PyInstaller  # noqa: F401
@@ -83,14 +98,6 @@ def main() -> int:
         "--collect-data", "cv2",
         "--collect-data", "yt_dlp",
 
-        # The CUDA runtime libraries, without which the GPU path cannot load.
-        # CTranslate2 finds these by DLL search path, not by import, so they
-        # have to be collected as binaries -- and transcriber.py registers the
-        # directory at runtime. Costs roughly 1.4GB of build, and buys a 5x
-        # faster transcription on any machine with an NVIDIA card. Machines
-        # without one ignore them and fall back to the CPU.
-        "--collect-binaries", "nvidia",
-
         # Torch is NOT what runs CUDA Whisper -- faster-whisper sits on
         # CTranslate2, which is collected above. Torch adds ~2GB and buys
         # nothing here, so it stays out.
@@ -108,6 +115,15 @@ def main() -> int:
         print(f"bundling binaries from {bin_dir}")
     else:
         print("no ./bin folder — ffmpeg will need to be on the user's PATH")
+
+    if use_cuda:
+        # CTranslate2 resolves cuBLAS and cuDNN through the DLL search path,
+        # not by importing them, so PyInstaller never sees them unless told.
+        # transcriber.py registers the directory at runtime.
+        cmd[-1:-1] = ["--collect-binaries", "nvidia"]
+        print("bundling the CUDA runtime — GPU transcription, ~2GB heavier")
+    else:
+        print("leaving the CUDA runtime out — transcription will run on the CPU")
 
     icon = ROOT / "assets" / "icon.ico"
     if icon.exists():
