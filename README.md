@@ -29,6 +29,17 @@ Type *"webcam at the top, vertical for Shorts, 5 clips"* and the frame updates a
 you type. Want one exact moment instead? Say *"cut 14:45 to 15:30"* and it skips
 the ranking entirely. The chips are shortcuts for phrases it already understands.
 
+### It keeps going when the AI provider does not
+
+Ranking a long VOD is a dozen calls to one company's servers, and free tiers get
+busy. A real run reached chunk 9 of 12 and started getting `503 UNAVAILABLE`,
+with an 11.9 GB download and a 29-minute transcription already paid for.
+
+Retrying Google does not fix Google being busy. So there is a fallback ladder:
+**Gemini → Groq → OpenAI**, free before paid, switching on a spent quota *or* on
+the retry budget running out. A [free Groq key](https://console.groq.com) takes a
+minute and no card, and is the single best insurance for a long run.
+
 ### It speaks your language — and hears the right one
 
 The interface ships in English, Hindi, Spanish, Portuguese, French, German and
@@ -352,6 +363,7 @@ The knobs that change output quality most, in order:
 | `CAM_PANEL_FRACTION` | `local/gaming_layout.py` | Webcam panel height, `0.42` by default |
 | `FACE_CONTEXT_MULTIPLE` | `local/gaming_layout.py` | Webcam zoom. Lower is tighter on your face |
 | `MAX_CLIP_SECONDS` | `shorts_generator/highlights.py` | Hard reject above 90s. The prompt separately targets 18–35s, because the completion bar gets stricter the longer a clip runs |
+| Provider | Settings | Gemini, Groq or OpenAI. Add a **free Groq key** as a fallback so a busy Gemini cannot end a run |
 | `LOCAL_WHISPER_MODEL` | `.env` | `base` is plenty for ranking. `small` reads better and hallucinates less — and on a GPU it is *faster* than `base`, so use it if you have one |
 | Spoken language | Render panel | English by default. Pinning it is the fix for whisper inventing text in another language |
 | Interface language | Settings | English, Hindi, Spanish, Portuguese, French, German, Japanese |

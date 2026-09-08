@@ -471,10 +471,50 @@ modes are diverse and do not present uniformly in the error string.
 Know the taxonomy: **transient** (retry), **permanent** (fail fast), and
 **ambiguous** (the interesting case — did the request actually take effect?).
 
-### Provider fallback
+### Provider fallback, and the ceiling on retrying
 
-Gemini primary, OpenAI when the daily quota is spent. A **fallback chain**, with
-usage accounting to know when to switch.
+Gemini → Groq → OpenAI. A **fallback chain**, with usage accounting to know when
+to switch.
+
+The idea worth carrying away: **retrying has a ceiling.** Exponential backoff
+handles a *blip*. It does nothing for a provider that is genuinely saturated —
+if Google is still refusing after four minutes, the ninth request to Google is
+not more likely to succeed than the eighth. What changes the outcome is asking
+somewhere whose capacity is *uncorrelated* with the thing that failed.
+
+That word is the whole point. Two Gemini models share Google's capacity, so
+switching between them buys nothing during an outage. Groq is a different
+company on different hardware, so its availability is independent. In reliability
+terms you are removing a **single point of failure** by adding a path with no
+**shared fate**.
+
+The ladder is ordered **free before paid**, so an automatic failover cannot
+quietly start spending money — a small design decision that matters a lot the
+first time it triggers unattended.
+
+Two implementation details worth being able to defend:
+
+- **Groq speaks the OpenAI API.** So the client is the `openai` package with a
+  different `base_url` — no new dependency, no second response parser to keep
+  correct. Reusing a *protocol* rather than writing an *integration*.
+- **The recursion terminates.** `_next_provider()` returns `None` when no
+  configured provider remains, which is what stops the dispatch calling itself
+  forever. Any fallback that re-enters its own entry point needs a provable
+  base case, and "the list ran out" is that case.
+
+### Failing over on the right signal
+
+The switch fires on two conditions that look similar and are not:
+
+| | means | retry? |
+|---|---|---|
+| **429**, per-day quota | allowance gone until reset | no — switch now |
+| **503**, after the full retry budget | provider is busy | no — already waited 4 min |
+
+Originally only the quota case was handled, which is exactly why a capacity
+spike could still kill a run. **Classifying a failure correctly is what decides
+whether the response to it is right** — the same distinction as transient vs
+permanent in [the taxonomy above](#10-cs-reliability-and-failure-design).
 
 ### Proving a device works
 
@@ -683,11 +723,12 @@ Ordered by value, with the reasoning that makes each defensible:
    baselines. One final comparison pass over the surviving candidates would make
    the global top-N meaningful rather than approximate.
 
-2. **A local LLM fallback.** The failure that nearly killed a real run was
-   *availability*, not quality. A local model via Ollama would never 503 and has
-   no daily quota. Be precise about the tradeoff: on 8 GB of VRAM you can run an
-   8–14B model, and it is genuinely **worse** than Gemini at nuanced judgement
-   over a long transcript. It is the right *fallback*, not the right primary.
+2. **A local LLM as the last rung.** Groq now covers the common case — a free
+   provider with independent capacity. What it does *not* cover is being
+   offline, or wanting the app to work with no API key at all. Ollama would.
+   Be precise about the tradeoff: on 8 GB of VRAM you can run an 8–14B model,
+   and it is genuinely **worse** than either cloud provider at nuanced judgement
+   over a long transcript. It is the right *last resort*, not the right primary.
 
 3. **Evaluation against real retention data.** Everything about the ranking
    rubric is currently assumed. Published Shorts produce retention curves; those

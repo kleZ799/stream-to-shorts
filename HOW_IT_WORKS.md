@@ -1356,14 +1356,53 @@ transcription, so a blip must not sink it. **The usual rule is inverted:**
 > `PERMISSION_DENIED`, `INVALID_ARGUMENT`, `404`, a spent daily allowance — and
 > **retry everything else.**
 
-Five attempts. If the error carries a `retry in Xs` hint, that exact delay is
-honoured (the rate limiter told us precisely how long to wait); otherwise
-exponential backoff capped at 60s.
+**Eight** attempts. If the error carries a `retry in Xs` hint, that exact delay
+is honoured (the rate limiter told us precisely how long to wait); otherwise
+exponential backoff capped at 60s — 5, 10, 20, 40, then 60s repeating, about
+4.2 minutes of patience in total.
 
-When the daily quota *is* gone and an OpenAI key is configured, the run **switches
-providers mid-flight** rather than losing the work. The switch is process-sticky
-— no point asking the spent provider again on every remaining chunk — and
-`reset_fallback()` clears it at the start of each new job.
+It used to be five, ≈75 seconds, and that was measurably too short: a real
+capacity spike outlasted it at chunk 9 of 12 and came within one attempt of
+discarding an 11.9 GB download and a 29-minute transcription. **A retry budget
+should be sized against how long the failure actually lasts and what losing the
+in-flight work costs**, not picked as a round number.
+
+### The fallback ladder
+
+Retrying has a ceiling, and it is a low one: if Google is still refusing after
+four minutes, more requests to Google will not help either. Somewhere else will,
+because its capacity has nothing to do with Google's. So there is a ladder:
+
+```
+gemini  →  groq  →  openai
+```
+
+**Free before paid**, so failing over cannot quietly start spending money.
+`_LADDER` pairs each provider with a predicate that reports whether its key is
+configured, and `_next_provider()` walks it and returns `None` when nothing is
+left — which is what stops `call_local_llm()` recursing forever when there is no
+fallback to reach.
+
+It fires on **two** distinct conditions, and telling them apart is the point:
+
+| | means | retrying helps? |
+|---|---|---|
+| **429** with a per-day quota | the allowance is gone until midnight Pacific | no — switch at once |
+| **503**, still failing after the full retry budget | the provider is busy | no — it already tried for 4 minutes |
+
+Only the first was handled originally, which is precisely why a capacity spike
+could still end a run.
+
+**Groq** is the interesting addition. It speaks the OpenAI Chat Completions API,
+so `call_groq_llm()` is the `openai` client with `base_url` pointed at
+`api.groq.com` — no new dependency, no second response parser. Its free tier is
+30 rpm / 1000 rpd / **8k tokens per minute**, and that last figure is the one
+that binds: a ranking chunk is roughly 6–7k tokens in and out together, so Groq
+runs at about one chunk a minute. Slower than Gemini, and infinitely faster than
+a failed run.
+
+The switch is process-sticky — no point asking the spent provider again on every
+remaining chunk — and `reset_fallback()` clears it at the start of each new job.
 
 Two Gemini-specific details:
 
