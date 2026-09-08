@@ -625,6 +625,48 @@ scope** rather than thread scope.
 
 ---
 
+## 12a. CS: process control, and trust as a UX property
+
+**The concept.** A process is something you can start, signal, suspend and
+account for — not just something you launch and hope about. Operating systems
+differ in what they offer, and the differences leak.
+
+**Where it shows up here.** `shorts_generator/proc.py`.
+
+**Suspension.** Stopping work that is already running is not the same as
+declining to start more of it. POSIX has `SIGSTOP` and `SIGCONT`; Windows has
+no signals and the equivalent is `NtSuspendProcess`, undocumented but stable
+for decades. Knowing that gap exists is the difference between a pause button
+that works and one that waits politely for a five-minute encode to finish.
+
+The design point underneath: a pause needs *both* a way to stop what is running
+and a gate on what starts next. Either alone leaves half the work going, and
+the race between them — a child started in the instant after the gate was
+checked — has to be closed deliberately rather than assumed away.
+
+**Inherited environment.** A GUI process has no console, so the OS creates one
+whenever it starts a console program. That is not a bug in either program; it
+is what happens when a design assumption (programs have a terminal) meets a
+context that breaks it. The general lesson is that a child inherits more from
+its parent than its arguments, and packaging changes what it inherits.
+
+**Trust is a user-facing property, not a technical one.** Black windows
+appearing and vanishing during a render broke nothing. It also made a
+legitimate program look like malware to the people running it, which is a real
+failure with a real cost — software that looks untrustworthy does not get run
+twice. The same is true of an unsigned binary: the honest response is not to
+insist it is fine, but to give people things they can check for themselves —
+public source, reproducible builds, published checksums, observable network
+behaviour.
+
+**Naming as an interface.** A folder of `0f83f76b5623` directories is correct
+and unusable. Identifiers serve the program; names serve the person, and when
+output lands somewhere a human will browse, the filesystem *is* part of the
+interface. Keeping both — a readable name outside, the id in a manifest inside
+— costs nothing and is why the rename did not break anything reading it.
+
+---
+
 ## 12b. CS: software distribution and self-update
 
 **The concept.** Getting software onto a machine and keeping it current are

@@ -56,3 +56,7 @@ bin/
 # (.claude/skills is tracked on purpose, so only the launch config is ignored)
 .claude/launch.json
 .impeccable/hook.cache.json
+
+# The folder guide the app drops beside its output. Lands here when run
+# from source, since the output root defaults to the working directory.
+READ ME - what is in here.txt

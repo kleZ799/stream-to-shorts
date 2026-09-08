@@ -1517,6 +1517,59 @@ are separate artifacts — one build run refreshes only one of them.
 
 ---
 
+## 16a. Subprocesses: windows, and stopping them
+
+Everything external this app runs — ffmpeg, ffprobe, and yt-dlp's own ffmpeg
+calls — goes through `shorts_generator/proc.py`. Two unrelated problems share
+that chokepoint, which is the reason it exists.
+
+### Why a windowed build flashes black boxes
+
+A GUI process has no console. When it starts a console program, Windows makes
+one for it. ffmpeg is a console program and a render runs dozens, so a long
+video means black windows blinking open and shut for minutes on end.
+
+That is cosmetic in the sense that nothing malfunctions, and not cosmetic at
+all in the sense that matters: an unsigned exe spawning unexplained console
+windows is indistinguishable, to a normal user, from something malicious. The
+fix is `CREATE_NO_WINDOW` plus a hidden `STARTUPINFO`.
+
+Our own call sites are the easy half. yt-dlp spawns ffmpeg itself, from inside
+a library, with no parameter to pass creationflags through — and a single
+download runs several. Rather than fork it, `silence_console_windows()` changes
+`subprocess.Popen`'s default at startup. Patching a stdlib constructor deserves
+suspicion, so it is kept narrow: Windows only, and only when `stdout.isatty()`
+is false, meaning there is no console to inherit. Run from a terminal, nothing
+is patched and output behaves normally.
+
+### Pausing work that is already running
+
+A cooperative pause — finish the current clip, then stop — is no use to the
+person this feature is for, whose machine is unusable *now*. ffmpeg holds every
+core it can get for the length of a clip.
+
+So pausing suspends the process. Windows has no `SIGSTOP`; the equivalent is
+`NtSuspendProcess` in ntdll, undocumented but stable since NT and what every
+process explorer uses. POSIX gets `SIGSTOP` and `SIGCONT`.
+
+`proc.py` keeps a registry of the children it started so it knows what to
+suspend, and a `threading.Event` gate that `run()` waits on before starting
+anything new. Both halves are needed: suspending only the current process would
+let the remaining clips start, and gating only the next one would leave the
+current ffmpeg running.
+
+Two edges worth naming. A child started in the gap between the gate check and
+registration is suspended immediately on registration, so a pause cannot be
+raced. And a job that *ends* while paused clears the gate on its way out —
+otherwise the next run would start and block on a pause with no UI to lift it,
+because the job it belonged to is gone.
+
+The honest limit: transcription is one long in-process call, not a child. Pause
+during that stage takes effect when the pipeline next reaches an external
+program rather than immediately.
+
+---
+
 ## 16b. Shipping updates to an installed .exe
 
 Packaging solves getting the app onto a machine once. It does nothing about the
@@ -1713,6 +1766,16 @@ is now `MAX_TRIM_SECONDS`.
 All routes bind `127.0.0.1`. There is no authentication — binding `0.0.0.0`
 exposes an unauthenticated service where every job spends the host's API quota
 and CPU, and `webapp/__main__.py` prints a warning when you do.
+
+### Pausing a run
+
+| Route | Purpose |
+|---|---|
+| `POST /api/jobs/{id}/pause` | Suspend the processes doing the work and hold back the next one |
+| `POST /api/jobs/{id}/resume` | Let them continue |
+
+The job snapshot carries `paused`, so a reloaded page agrees with the worker
+rather than guessing from what the button last did.
 
 ### Version and updates
 

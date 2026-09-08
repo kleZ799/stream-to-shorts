@@ -73,6 +73,31 @@ told which stage it's on, because a three-hour VOD is not a two-second wait.
 
 <img src="assets/screenshots/02-progress.png" alt="A job mid-run, transcribing at 42%, with the log open" width="880">
 
+### Pause it when you need your machine back
+
+Rendering takes every core it can get. If that makes the PC unusable, **Pause**
+suspends the work where it stands — ffmpeg is stopped, not asked politely to
+finish the current clip — and the CPU comes back immediately. Resume picks up
+where it left off; nothing is lost and nothing is re-done.
+
+### Your clips folder is readable
+
+Runs are filed under the **title of the video they came from**, with the date,
+not a random id. Downloaded sources are named after the video too, with its
+YouTube id in brackets so two videos with the same title stay apart.
+
+The app also leaves a short note in that folder explaining what each part is,
+which files are safe to delete, and which one to leave alone — because the big
+downloads are the thing worth clearing out, and the manifest is the thing worth
+keeping.
+
+### No windows flashing at you
+
+ffmpeg is a console program, and a windowed app starting one makes Windows open
+a console for it. A long render used to mean dozens of black windows blinking
+open and shut. They are hidden now. If you saw those and wondered what they
+were: that was the video tool doing the cutting, and hiding it was overdue.
+
 ### It updates itself
 
 The app is one .exe people download once, so a fix that ships is a fix that has
@@ -120,6 +145,29 @@ Double-click it. On first run it asks for a [free Gemini API key](https://aistud
 
 **This is the only time you download by hand.** From v1.5.0 the app updates
 itself: it notices new releases, checks them, and replaces itself in place.
+
+<details>
+<summary>Windows says it isn't safe — is it?</summary>
+
+Windows shows **"Windows protected your PC"** because the exe is not
+code-signed. Certificates cost a few hundred dollars a year and this is free
+software; SmartScreen is reporting the missing signature, not a finding about
+the file. It says the same about most independent software on release day.
+
+What you can check instead of taking that on trust:
+
+- **Every line is public**, and the exe is built from this repository by
+  GitHub's own runners — the [build log](https://github.com/kleZ799/stream-to-shorts/actions)
+  is readable by anyone.
+- **Each release publishes a SHA-256** for the exe, and the app verifies it
+  when updating itself.
+- **It works with the network off.** Transcribing and ranking run on your
+  machine. It contacts YouTube to fetch a video, your AI provider to rank
+  moments, and GitHub to check for updates. Your video never leaves the PC.
+
+To run it: **More info → Run anyway**.
+
+</details>
 
 <details>
 <summary>First-run details</summary>
