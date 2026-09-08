@@ -132,7 +132,17 @@ Rules:
   about to copy is filler, setup, or a neutral observation, then the clip starts
   in the wrong place and you must move start_time to a line that hooks.
 - "hook_sentence" is that same opening line
-- Score each clip TWICE, 0-100, independently:
+- Score each clip TWICE, 0-100, independently. USE THE WHOLE SCALE. Anchors:
+    90-100  once or twice in an entire stream. You would open the channel with it.
+    70-89   strong. A clear reaction or line a stranger would watch to the end.
+    50-69   good in the moment, ordinary as a Short. Works for existing fans only.
+    30-49   mildly amusing if you were there. Flat to a stranger.
+    0-29    nothing really happens, or it cannot land without prior context.
+  Most moments in any stream sit between 30 and 60. A twenty-minute stretch
+  containing eight 90s does not exist. If your scores land inside a ten-point
+  band you have not ranked anything — you have only agreed with yourself, and
+  the clips that get cut will be chosen at random from the tie. Spread them
+  out, and let at most one clip in this chunk score above 90.
     "score" — viral potential of the moment as a whole
     "hook_score" — how hard "first_line" ALONE stops a scroll, judged as if you
       cannot see the rest of the clip. Setup, filler or a flat observation
@@ -146,8 +156,11 @@ Respond ONLY with valid JSON (no markdown, no explanation):
 
 # Bump whenever the ranking prompt -- or the shape of the transcript we hand
 # it -- changes meaning. v3 widened each chunk's declared duration to cover its
-# overlap tail, so chunks ranked under v2 were asked a narrower question.
-PROMPT_VERSION = 3
+# overlap tail, so chunks ranked under v2 were asked a narrower question. v4
+# anchored the 0-100 scale: without anchors a real 96-candidate run came back
+# spread over 73-95, so the top-five cut was being made on gaps smaller than
+# the model's own noise. Cached v3 chunks are not comparable and must be redone.
+PROMPT_VERSION = 4
 HOOK_SCORE_WEIGHT = 0.4       # how much the opening line counts toward the rank
 MAX_CLIP_SECONDS = 90         # reject anything the model returns above this
 CHUNK_SIZE_SECONDS = 1200       # 20-min chunks for long videos
