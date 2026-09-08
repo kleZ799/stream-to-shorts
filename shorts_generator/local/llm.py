@@ -146,7 +146,13 @@ def call_gemini_llm(prompt: str) -> str:
     # rule is inverted: give up immediately only on errors that retrying can
     # never fix (bad key, bad request, a spent daily allowance), and retry
     # everything else.
-    attempts = 5
+    #
+    # Eight, not five: five backs off 5+10+20+40s and gives up after barely a
+    # minute, which is shorter than a Gemini capacity spike routinely lasts.
+    # Losing a chunk that late costs the whole ranking pass on a long video,
+    # because a chunk is only checkpointed once it succeeds. The extra three
+    # attempts sit at the 60s cap, so patience runs to about four minutes.
+    attempts = 8
     last_error = None
     for attempt in range(attempts):
         try:
