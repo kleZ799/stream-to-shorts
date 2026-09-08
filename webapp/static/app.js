@@ -554,6 +554,7 @@ async function openExternal(what) {
 $("creditYt").onclick = (e) => { e.preventDefault(); openExternal("author-youtube"); };
 $("creditGh").onclick = (e) => { e.preventDefault(); openExternal("author-github"); };
 $("creditLi").onclick = (e) => { e.preventDefault(); openExternal("author-linkedin"); };
+$("creditDc").onclick = (e) => { e.preventDefault(); openExternal("author-discord"); };
 $("creditDonate").onclick = (e) => { e.preventDefault(); openExternal("donate"); };
 
 // ---------------------------------------------------------------- welcome
@@ -618,6 +619,133 @@ $("welcome").addEventListener("keydown", (e) => {
   if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
   else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
 });
+
+// ---------------------------------------------------------------- updates
+//
+// The app is a single .exe people download once, so without this a fix ships
+// and never reaches them. The check is one request to GitHub at launch; it
+// stays silent unless there is something to say, and silent if it fails --
+// an app that cannot reach GitHub is still a working app.
+//
+// The page never handles a download URL. It asks the server to install "the
+// update" and the server resolves which file that is from the repository
+// compiled into the build.
+
+let updateState = null;
+let updatePoll = null;
+
+function fmtMB(bytes) {
+  return bytes ? Math.round(bytes / 1e6) + " MB" : "";
+}
+
+function showUpdate(title, sub, { bar = false, actions = true } = {}) {
+  $("wUpdate").classList.remove("hidden");
+  $("wuTitle").textContent = title;
+  $("wuSub").textContent = sub || "";
+  $("wuBar").classList.toggle("hidden", !bar);
+  $("wuActions").classList.toggle("hidden", !actions);
+}
+
+async function checkUpdate(loud) {
+  try {
+    const d = await api("/api/update/check");
+    updateState = d;
+    renderVersionRow(d);
+
+    if (d.status === "update" || d.status === "rollback") {
+      const verb = d.status === "rollback" ? "Roll back to" : "Version";
+      showUpdate(`${verb} ${d.latest} is available`,
+                 `You have ${d.current}. ${fmtMB(d.size)} download.`);
+      $("wuGo").textContent = d.status === "rollback" ? "Roll back now" : "Update now";
+      $("wuGo").disabled = !d.can_install;
+      if (!d.can_install && d.reason) $("wuSub").textContent = d.reason;
+    } else if (loud) {
+      toast(d.status === "current"
+        ? `You are on the latest version (${d.current}).`
+        : (d.reason || "Could not check for updates."));
+    }
+  } catch (e) {
+    if (loud) toast(e.message, true);
+  }
+}
+
+function renderVersionRow(d) {
+  const el = $("verInfo");
+  if (!el) return;
+  const rows = [["Installed", d.current]];
+  if (d.latest) rows.push(["Newest release", d.latest]);
+  if (d.reason) rows.push(["Note", d.reason]);
+  el.innerHTML = rows.map(([k, v]) => `<div><span>${esc(k)}</span><b>${esc(v)}</b></div>`).join("");
+}
+
+function stopUpdatePoll() {
+  if (updatePoll) { clearInterval(updatePoll); updatePoll = null; }
+}
+
+async function pollUpdate() {
+  let p;
+  try {
+    p = await api("/api/update/progress");
+  } catch (e) {
+    return;                     // a dropped poll is not a failed download
+  }
+  if (p.state === "downloading") {
+    showUpdate("Downloading the update…",
+               `${fmtMB(p.done)} of ${fmtMB(p.total)}`, { bar: true, actions: false });
+    $("wuFill").style.width = p.percent + "%";
+  } else if (p.state === "verifying") {
+    showUpdate("Checking the download…", "Making sure it arrived intact.",
+               { bar: true, actions: false });
+    $("wuFill").style.width = "100%";
+  } else if (p.state === "ready") {
+    stopUpdatePoll();
+    showUpdate("Ready to install",
+               "The app will close and reopen on the new version.");
+    $("wuGo").disabled = false;
+    $("wuGo").textContent = "Restart now";
+    $("wuGo").onclick = applyUpdate;
+  } else if (p.state === "failed") {
+    stopUpdatePoll();
+    showUpdate("The update could not be downloaded", p.error || "");
+    $("wuGo").disabled = false;
+    $("wuGo").textContent = "Try again";
+    $("wuGo").onclick = startUpdate;
+  }
+}
+
+async function startUpdate() {
+  $("wuGo").disabled = true;
+  try {
+    await api("/api/update/install", json("POST", {}));
+    showUpdate("Starting the download…", "", { bar: true, actions: false });
+    stopUpdatePoll();
+    updatePoll = setInterval(pollUpdate, 600);
+  } catch (e) {
+    $("wuGo").disabled = false;
+    showUpdate("The update could not be started", e.message);
+  }
+}
+
+async function applyUpdate() {
+  $("wuGo").disabled = true;
+  showUpdate("Restarting…", "The window will close and come back.",
+             { bar: false, actions: false });
+  try {
+    await api("/api/update/apply", json("POST", {}));
+  } catch (e) {
+    showUpdate("Could not install the update", e.message);
+    $("wuGo").disabled = false;
+  }
+}
+
+$("wuGo").onclick = startUpdate;
+$("wuNotes").onclick = () => openExternal("releases");
+
+if ($("verCheck")) {
+  $("verCheck").onclick = () => checkUpdate(true);
+}
+
+checkUpdate(false);
 
 openWelcome();
 

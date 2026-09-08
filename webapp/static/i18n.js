@@ -145,6 +145,8 @@ window.I18N = (function () {
       "Email": "ईमेल",
       "Copy": "कॉपी",
       "Email address copied": "ईमेल पता कॉपी हो गया",
+      "Discord": "डिस्कॉर्ड",
+      "Join the server": "सर्वर जॉइन करें",
     },
 
     // ---------------------------------------------------------------- Español
@@ -276,6 +278,8 @@ window.I18N = (function () {
       "Email": "Correo",
       "Copy": "Copiar",
       "Email address copied": "Dirección de correo copiada",
+      "Discord": "Discord",
+      "Join the server": "Únete al servidor",
     },
 
     // -------------------------------------------------------------- Português
@@ -407,6 +411,8 @@ window.I18N = (function () {
       "Email": "E-mail",
       "Copy": "Copiar",
       "Email address copied": "Endereço de e-mail copiado",
+      "Discord": "Discord",
+      "Join the server": "Entre no servidor",
     },
 
     // --------------------------------------------------------------- Français
@@ -538,6 +544,8 @@ window.I18N = (function () {
       "Email": "E-mail",
       "Copy": "Copier",
       "Email address copied": "Adresse e-mail copiée",
+      "Discord": "Discord",
+      "Join the server": "Rejoindre le serveur",
     },
 
     // ---------------------------------------------------------------- Deutsch
@@ -669,6 +677,8 @@ window.I18N = (function () {
       "Email": "E-Mail",
       "Copy": "Kopieren",
       "Email address copied": "E-Mail-Adresse kopiert",
+      "Discord": "Discord",
+      "Join the server": "Server beitreten",
     },
 
     // ------------------------------------------------------------------ 日本語
@@ -800,6 +810,8 @@ window.I18N = (function () {
       "Email": "メール",
       "Copy": "コピー",
       "Email address copied": "メールアドレスをコピーしました",
+      "Discord": "Discord",
+      "Join the server": "サーバーに参加",
     },
   };
 

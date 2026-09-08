@@ -22,6 +22,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from shorts_generator.layout_spec import ASPECT_PRESETS, LayoutSpec, parse_layout_prompt
+from . import updater
 from .jobs import STORE, regenerate_seo, rename_to_title
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -471,8 +472,10 @@ EXTERNAL_LINKS = {
     "author-youtube": "https://www.youtube.com/@ParthBhadana799",
     "author-github": "https://github.com/kleZ799",
     "author-linkedin": "https://www.linkedin.com/in/parth-bhadana-530014202/",
+    "author-discord": "https://discord.gg/jnMrGbBz3m",
     "repo": "https://github.com/kleZ799/stream-to-shorts",
     "donate": "https://buymeacoffee.com/parthbhadana",
+    "releases": "https://github.com/kleZ799/stream-to-shorts/releases/latest",
 }
 
 
@@ -859,6 +862,48 @@ async def save_clip(job_id: str, filename: str, req: SaveClipRequest) -> dict:
     STORE.replace_clip(job, safe, {"saved_to": str(dest)})
     return {"saved": True, "path": str(dest), "folder": str(dest_dir)}
 
+
+
+# --- updates --------------------------------------------------------------
+#
+# The page never supplies a URL. It asks "is there an update", and asks the
+# server to install "the update" -- which the server resolves for itself from
+# the repository compiled into the build. Anything rendered in the window is
+# therefore unable to point the updater at a file of its choosing.
+
+def _public(state: dict) -> dict:
+    """Drop the internal download fields before the state reaches the page."""
+    return {k: v for k, v in state.items() if not k.startswith("_")}
+
+
+@app.get("/api/update/check")
+async def update_check() -> dict:
+    return _public(await asyncio.to_thread(updater.check))
+
+
+@app.post("/api/update/install")
+async def update_install() -> dict:
+    state = await asyncio.to_thread(updater.check)
+    if state["status"] not in ("update", "rollback") or not state["can_install"]:
+        raise HTTPException(400, state["reason"] or "There is nothing to install.")
+    if not updater.INSTALL.start(state["_url"], state["_digest"]):
+        raise HTTPException(409, "An update is already downloading.")
+    return {"started": True, "version": state["latest"], "size": state["size"]}
+
+
+@app.get("/api/update/progress")
+async def update_progress() -> dict:
+    return updater.INSTALL.snapshot()
+
+
+@app.post("/api/update/apply")
+async def update_apply() -> dict:
+    """Swap in the verified build and relaunch. The app exits right after."""
+    try:
+        await asyncio.to_thread(updater.INSTALL.apply_and_restart)
+    except Exception as e:
+        raise HTTPException(400, str(e))
+    return {"restarting": True}
 
 
 class RevalidatingStatic(StaticFiles):

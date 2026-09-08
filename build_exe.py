@@ -14,6 +14,7 @@ missing at startup.
 """
 import argparse
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -26,6 +27,26 @@ NAME = "StreamToShorts"
 def _sep() -> str:
     # PyInstaller's --add-data separator is platform-specific.
     return ";" if os.name == "nt" else ":"
+
+
+def _check_version_agreement() -> None:
+    """Refuse to build when version_info.txt and APP_VERSION disagree."""
+    sys.path.insert(0, str(ROOT))
+    from shorts_generator.version import APP_VERSION
+
+    vf = ROOT / "version_info.txt"
+    if not vf.exists():
+        return
+    text = vf.read_text(encoding="utf-8", errors="replace")
+    found = set(re.findall(r"String[Ss]truct\(\s*'(?:File|Product)Version',\s*'([^']+)'", text))
+    mismatched = {v for v in found if v.strip() != APP_VERSION}
+    if mismatched:
+        raise SystemExit(
+            f"version mismatch: shorts_generator/version.py says {APP_VERSION}, "
+            f"version_info.txt says {', '.join(sorted(mismatched))}. "
+            f"Make them agree before building."
+        )
+    print(f"version {APP_VERSION} — version_info.txt agrees")
 
 
 def main() -> int:
@@ -49,6 +70,13 @@ def main() -> int:
     # by every user on every run -- including the majority with no NVIDIA card
     # who cannot use it at all.
     use_cuda = (not args.onefile) if args.cuda is None else args.cuda
+
+    # The updater compares the running build's APP_VERSION against the newest
+    # release tag. If the version resource says one thing and APP_VERSION says
+    # another, a shipped build offers every user an "update" to the version
+    # they are already running -- so the two are checked here rather than
+    # discovered in the wild.
+    _check_version_agreement()
 
     try:
         import PyInstaller  # noqa: F401

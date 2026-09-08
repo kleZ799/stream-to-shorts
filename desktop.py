@@ -198,6 +198,15 @@ def main() -> int:
                f"first start can take a moment.", error=False)
         return 0
 
+    # An update renames the old exe aside rather than deleting it, because it
+    # is still running at that moment. This is the first launch where nothing
+    # holds it, so this is where it goes.
+    try:
+        from webapp.updater import cleanup_previous
+        cleanup_previous()
+    except Exception:
+        pass        # a leftover file is not a reason to fail to start
+
     port = _free_port()
     url = f"http://127.0.0.1:{port}"
 
