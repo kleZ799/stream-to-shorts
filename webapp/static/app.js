@@ -203,15 +203,22 @@ async function checkSetup() {
 // not in a docs page you would have to go looking for.
 function drawModels(d) {
   const fld = $("modelFld"), sel = $("setModel"), hint = $("modelHint");
-  const models = d.gemini_models || [];
-  if (d.provider !== "gemini" || !models.length) { fld.hidden = true; hint.textContent = ""; return; }
+  // Groq gets a picker too. Its models differ by size rather than by daily
+  // allowance, so they carry a written note instead of a number — hiding the
+  // control entirely, as this used to, left no way to choose one at all.
+  const groq = d.provider === "groq";
+  const models = (groq ? d.groq_models : d.gemini_models) || [];
+  if (!["gemini", "groq"].includes(d.provider) || !models.length) {
+    fld.hidden = true; hint.textContent = ""; return;
+  }
 
   fld.hidden = false;
   // A model we have no confirmed number for says so, rather than showing a
   // guess with the same confidence as a checked one.
   sel.innerHTML = models.map((m) => {
-    const note = m.daily_free ? `${m.daily_free}/day free` : "limit unknown";
-    return `<option value="${esc(m.value)}">${esc(m.value)} — ${note}</option>`;
+    const note = groq ? m.note
+                      : (m.daily_free ? `${m.daily_free}/day free` : "limit unknown");
+    return `<option value="${esc(m.value)}">${esc(m.value)} — ${esc(note)}</option>`;
   }).join("");
   if (models.some((m) => m.value === d.model)) sel.value = d.model;
   else sel.insertAdjacentHTML("afterbegin",
@@ -219,22 +226,29 @@ function drawModels(d) {
 
   if (d.model_pinned) {
     sel.disabled = true;
-    hint.textContent = "GEMINI_MODEL in your environment is deciding this one.";
+    hint.textContent = `${groq ? "GROQ_MODEL" : "GEMINI_MODEL"} in your `
+      + "environment is deciding this one.";
     return;
   }
   sel.disabled = false;
-  hint.textContent = "This list comes from your key, so retired models can't appear. "
-    + "Daily limits are the published free-tier numbers where known — the app "
-    + "trusts a real quota error over them.";
-  sel.onchange = () => saveModel(sel.value);
+  hint.textContent = groq
+    ? "Groq's free tier is the same for every model here — 30 a minute, 1000 a "
+      + "day, 8k tokens a minute — so this is a straight quality-for-speed "
+      + "trade, not an allowance one."
+    : "This list comes from your key, so retired models can't appear. "
+      + "Daily limits are the published free-tier numbers where known — the app "
+      + "trusts a real quota error over them.";
+  sel.onchange = () => saveModel(sel.value, d.provider);
 }
 
-async function saveModel(model) {
+async function saveModel(model, provider) {
   const hint = $("modelHint");
   try {
-    // as_fallback: change the model, not which provider is active.
+    // as_fallback: change the model, not which provider is active. The
+    // provider has to be passed rather than hardcoded, or picking a Groq
+    // model files it under GEMINI_MODEL and nothing appears to change.
     await api("/api/settings", json("POST", {
-      provider: "gemini", model, as_fallback: true,
+      provider: provider || "gemini", model, as_fallback: true,
     }));
     await checkSetup();
     refreshUsage();

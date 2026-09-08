@@ -121,6 +121,18 @@ def _gemini_model_options() -> list:
     return opts
 
 
+# Groq's own /models endpoint needs a key, and the UI has to render this
+# panel before one exists. The free-tier line-up is short and stable enough
+# to state, and an unknown model typed into settings.json still works --
+# this list is a convenience, not a whitelist.
+GROQ_MODEL_OPTIONS = [
+    {"value": "openai/gpt-oss-120b", "note": "120B — best judgement, the default"},
+    {"value": "qwen/qwen3.8-27b", "note": "27B — strongest at holding a JSON schema"},
+    {"value": "qwen/qwen3.6-27b", "note": "27B — previous Qwen"},
+    {"value": "openai/gpt-oss-20b", "note": "20B — fastest, weakest ranking"},
+]
+
+
 @app.get("/api/settings")
 async def get_settings() -> dict:
     """What the UI needs to decide whether to show first-run setup.
@@ -144,6 +156,7 @@ async def get_settings() -> dict:
         # rather than asking for a key that is on disk already.
         "keys": {
             "gemini": bool(user_config.get("GEMINI_API_KEY")),
+            "groq": bool(user_config.get("GROQ_API_KEY")),
             "openai": bool(user_config.get("OPENAI_API_KEY")),
         },
         "daily_limits": {
@@ -159,7 +172,10 @@ async def get_settings() -> dict:
         # difference between a working afternoon and a paid API. Offered here
         # so the choice is made with the number in view.
         "gemini_models": _gemini_model_options(),
-        "model_pinned": bool(os.getenv("GEMINI_MODEL", "").strip()),
+        "groq_models": GROQ_MODEL_OPTIONS,
+        "model_pinned": bool(os.getenv("GEMINI_MODEL", "").strip())
+        if provider == "gemini" else bool(os.getenv("GROQ_MODEL", "").strip())
+        if provider == "groq" else bool(os.getenv("OPENAI_MODEL", "").strip()),
     }
 
 
