@@ -386,6 +386,17 @@ class Install:
             os.replace(backup, exe)
             raise
 
+        # os.replace is supposed to consume the staged file, and usually does.
+        # It was observed not to: on some volumes Windows satisfies the move by
+        # copying and leaving the source, which stranded a 219 MB duplicate
+        # next to the exe it had just become. Deleting it explicitly costs one
+        # syscall and does not depend on which path the move took.
+        try:
+            if staged.exists():
+                staged.unlink()
+        except OSError:
+            pass        # the next launch sweeps it
+
         # Detached, so it is not killed along with this process a moment later.
         flags = 0
         if os.name == "nt":
