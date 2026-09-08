@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -64,8 +64,11 @@ class JobRequest(BaseModel):
 # --- routes ---------------------------------------------------------------
 
 @app.get("/", response_class=HTMLResponse)
-async def index() -> str:
-    return (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+async def index() -> HTMLResponse:
+    return HTMLResponse(
+        (STATIC_DIR / "index.html").read_text(encoding="utf-8"),
+        headers={"Cache-Control": "no-cache"},
+    )
 
 
 @app.get("/api/options")
@@ -858,4 +861,26 @@ async def save_clip(job_id: str, filename: str, req: SaveClipRequest) -> dict:
 
 
 
-app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+class RevalidatingStatic(StaticFiles):
+    """StaticFiles that makes the browser check before reusing a file.
+
+    Without a Cache-Control header a browser is free to invent its own
+    freshness window, and it does. That is harmless for a website that gets
+    reloaded, and wrong for this app: the packaged build keeps its WebView2
+    cache across an upgrade, so someone moving from one version to the next
+    can keep running the old UI out of cache and never see what changed --
+    with no reload button anywhere in the window to break the tie.
+
+    "no-cache" is not "do not store". The file stays cached; the browser just
+    has to ask whether it is still current, and StaticFiles answers a matching
+    ETag with an empty 304. The cost is one conditional request per file per
+    launch, against a server on the same machine.
+    """
+
+    def file_response(self, *args, **kwargs) -> Response:
+        resp = super().file_response(*args, **kwargs)
+        resp.headers["Cache-Control"] = "no-cache"
+        return resp
+
+
+app.mount("/static", RevalidatingStatic(directory=str(STATIC_DIR)), name="static")
