@@ -29,6 +29,17 @@ Type *"webcam at the top, vertical for Shorts, 5 clips"* and the frame updates a
 you type. Want one exact moment instead? Say *"cut 14:45 to 15:30"* and it skips
 the ranking entirely. The chips are shortcuts for phrases it already understands.
 
+### It speaks your language — and hears the right one
+
+The interface ships in English, Hindi, Spanish, Portuguese, French, German and
+Japanese, switchable in Settings. A fresh install is always English, and the
+browser's locale is deliberately ignored — a machine set to another language
+should not hand a first-run user an interface nobody chose.
+
+Separately, the *spoken* language of the video is pinned to English by default
+and changeable per run. Those are two different settings on purpose: you might
+run an English interface over a Hindi stream.
+
 ### It watches the whole VOD so you don't have to
 
 Transcribes the audio locally with faster-whisper, then ranks every moment for
@@ -67,6 +78,7 @@ Double-click it. On first run it asks for a [free Gemini API key](https://aistud
 - **First launch is slow.** It's a single file that unpacks itself each time.
 - **Where things go.** The key lives at `%APPDATA%\StreamToShorts\settings.json`; clips go to `%USERPROFILE%\Videos\StreamToShorts`, changeable in Settings.
 - **ffmpeg is bundled**, so there is nothing else to install.
+- **The downloadable .exe transcribes on the CPU.** The CUDA runtime is 2GB, and a single-file exe re-unpacks its whole payload on every launch — so bundling it would cost every user a slow start for something only NVIDIA owners can use. If you have an NVIDIA card and want the ~5x faster transcription, build the one-folder version from source: `pip install nvidia-cublas-cu12 nvidia-cudnn-cu12` then `python build_exe.py` (CUDA is the default there; `--no-cuda` opts out).
 
 </details>
 
@@ -181,7 +193,11 @@ Already have the VOD on disk? Pass the path — it's used as-is, nothing downloa
 
 ### 2. Transcribe
 
-faster-whisper, on your CPU (`int8`) or GPU (`float16`) — auto-detected, no config needed. The transcript is cached beside the video as an `.srt`, validated by modification time.
+faster-whisper, on your CPU (`int8`) or GPU (`float16`) — auto-detected. The transcript is cached beside the video as an `.srt`, validated by modification time.
+
+**The spoken language is pinned to English by default**, changeable per run in the Render panel, with an explicit `auto` for genuinely mixed sources. This matters more than it sounds: left on auto-detect, whisper drifts on game audio and music beds and starts emitting fluent nonsense in a language nobody spoke. One 3h47m English stream came back with 703 of its 1097 cues in hallucinated Korean — and one of those cues became a clip title.
+
+**GPU detection asks CTranslate2, not torch.** faster-whisper runs on CTranslate2; torch is not installed and is explicitly excluded from the build, so probing `torch.cuda.is_available()` silently sent every machine down the CPU path. If you have an NVIDIA card, `pip install nvidia-cublas-cu12 nvidia-cudnn-cu12` — the packaged one-folder build already ships them. Measured on an RTX 5060 (8GB): 900s of audio with the `small` model, **104.2s on CPU → 20.8s on CUDA**.
 
 **This is the slowest step in the pipeline and you pay it exactly once per VOD.** Every re-rank and re-render after that is free.
 
@@ -331,7 +347,9 @@ The knobs that change output quality most, in order:
 | `CAM_PANEL_FRACTION` | `local/gaming_layout.py` | Webcam panel height, `0.42` by default |
 | `FACE_CONTEXT_MULTIPLE` | `local/gaming_layout.py` | Webcam zoom. Lower is tighter on your face |
 | `MAX_CLIP_SECONDS` | `shorts_generator/highlights.py` | Hard reject above 90s. The prompt separately targets 18–35s, because the completion bar gets stricter the longer a clip runs |
-| `LOCAL_WHISPER_MODEL` | `.env` | `base` is plenty for ranking. `small` and `medium` read better but are much slower on CPU |
+| `LOCAL_WHISPER_MODEL` | `.env` | `base` is plenty for ranking. `small` reads better and hallucinates less — and on a GPU it is *faster* than `base`, so use it if you have one |
+| Spoken language | Render panel | English by default. Pinning it is the fix for whisper inventing text in another language |
+| Interface language | Settings | English, Hindi, Spanish, Portuguese, French, German, Japanese |
 
 ---
 
