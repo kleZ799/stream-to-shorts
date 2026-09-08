@@ -770,16 +770,72 @@ existed a real title, including ones whose only remaining trace is the mp4.
 
 `local/transcriber.py`, faster-whisper.
 
-**Device selection** is auto by default: `cuda` + `float16` if torch reports a
-*working* CUDA — it actually allocates a tensor (`torch.zeros(1, device="cuda")`)
-to catch missing cuBLAS/cuDNN libraries, which otherwise fail later and less
-clearly. Otherwise `cpu` + `int8`.
+**Device selection** is auto by default: `cuda` + `float16` when a usable GPU is
+found, otherwise `cpu` + `int8`. Getting this right took three separate fixes,
+and each failure was silent — worth studying as a case of *asking the wrong
+component a reasonable-sounding question*:
+
+1. **Ask CTranslate2, not torch.** The original probe called
+   `torch.cuda.is_available()`. But faster-whisper does not run on torch — it
+   runs on **CTranslate2**, and torch is not installed here at all (it is an
+   explicit `--exclude-module` in the build, because it adds ~2GB and is not
+   used). So the import raised `ImportError`, the handler swallowed it, and
+   every machine took the CPU path. The correct probe is
+   `ctranslate2.get_cuda_device_count() > 0`.
+2. **Register the DLL directories.** `nvidia-cublas-cu12` and
+   `nvidia-cudnn-cu12` install their DLLs under `site-packages/nvidia/*/bin`.
+   Python 3.8+ removed the current directory and `PATH` from the DLL search
+   order, and CTranslate2 — unlike torch — never calls `os.add_dll_directory`
+   for them. So *installing the wheels changes nothing*: the device counts, the
+   model constructs, and the first `encode()` dies on `cublas64_12.dll is not
+   found`.
+3. **Ship them.** PyInstaller cannot see a dependency that is resolved by DLL
+   search path rather than by import, so the build needs
+   `--collect-binaries nvidia`.
+
+The lesson worth keeping: **a device that enumerates, and a model that
+constructs on it, are both worthless as proof.** Only draining the segment
+generator exercises the maths library. So the fallback wraps the *entire*
+transcription, not the constructor:
+
+```python
+try:
+    segments, info = _run(device, compute_type)      # drains the generator
+except Exception:
+    if device != "cuda":
+        raise
+    device, compute_type = "cpu", "int8"
+    segments, info = _run(device, compute_type)      # redo the whole thing
+```
+
+Measured on an RTX 5060 Laptop (8GB), 900s of audio:
+
+| model | device | time | realtime factor |
+|---|---|---|---|
+| base | cuda | 25.3s | 35.6x |
+| base | cpu | 46.1s | 19.5x |
+| small | **cuda** | **20.8s** | **43.3x** |
+| small | cpu | 104.2s | 8.6x |
+
+Note `small` on CUDA beats `base` on CUDA. On a GPU the *more accurate* model is
+also the faster one, which matters because model size is the main defence
+against the hallucination described next.
+
+**Language pinning.** The spoken language defaults to `en` rather than
+auto-detect. Whisper re-decides the language on unclear audio, and on a game
+stream — music beds, effects, non-speech — it drifts and then generates fluent,
+confident text in the language it landed on. A real 3h47m English VOD came back
+with **703 of 1097 cues in Korean**, none of it spoken. One of those hallucinated
+cues propagated into a clip's `hook_sentence`, then into its SEO title (via the
+fallback in [§9](#9-seo-the-packaging-step)), then into the filename on disk.
+`"auto"` is still available and is the only value that restores auto-detection.
 
 **Settings that matter:**
 
 - `beam_size=5`
 - `condition_on_previous_text=False` — stops Whisper looping a hallucinated
-  phrase forward through a long VOD.
+  phrase forward through a long VOD. Note this limits *propagation* of a
+  hallucination, not its *occurrence*; language pinning addresses the latter.
 - **VAD off by default.** Voice-activity detection is too aggressive on mixed
   speech/music content — a stream with a game score under the mic loses real
   speech to it. Enable with `LOCAL_WHISPER_VAD_FILTER=true`.
