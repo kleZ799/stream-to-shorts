@@ -1,0 +1,152 @@
+# Builds the Windows exe and publishes it as a release.
+#
+#     git tag -a v1.6.0 -m "Stream to Shorts v1.6.0"
+#     git push origin v1.6.0
+#
+# That is the whole release. The exe is built here rather than on a laptop,
+# which matters more than convenience now that the app updates itself: what
+# this workflow publishes is what every installed copy will download and run.
+#
+# Release notes come from docs/release-notes/<tag>.md when that file exists,
+# and from GitHub's generated commit summary when it does not.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to build and release (e.g. v1.6.0)"
+        required: true
+
+permissions:
+  contents: write        # needed to create the release
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false     # never kill a half-finished upload
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Work out which tag we are building
+        id: tag
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "name=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.tag.outputs.name }}
+          fetch-depth: 0
+
+      # The updater compares the tag on the newest release against the version
+      # compiled into the running build. If those disagree, every user is
+      # offered an update that installs the version they already have and then
+      # offers it again. Catching that here costs a second; catching it after
+      # release means pulling a build back from people who already took it.
+      - name: Refuse to build if the tag and the code disagree
+        shell: bash
+        run: |
+          tag="${{ steps.tag.outputs.name }}"
+          code=$(python -c "import re,io; s=io.open('shorts_generator/version.py',encoding='utf-8').read(); print(re.search(r'APP_VERSION\s*=\s*\"([^\"]+)\"', s).group(1))")
+          echo "tag:  $tag"
+          echo "code: $code"
+          if [ "$tag" != "v$code" ]; then
+            echo "::error::Tag $tag does not match APP_VERSION $code in shorts_generator/version.py."
+            echo "::error::Bump version.py and version_info.txt, then retag."
+            exit 1
+          fi
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-web.txt pyinstaller
+
+      # bin/ is gitignored -- it is 200 MB of binaries that do not belong in
+      # git -- so the runner fetches its own copy. build_exe.py bundles
+      # whatever it finds there, and without it the exe would ship expecting
+      # ffmpeg to already be on the user's PATH, which is the whole thing this
+      # app promises not to require.
+      - name: Fetch ffmpeg
+        shell: pwsh
+        run: |
+          $url = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
+          Write-Host "downloading $url"
+          Invoke-WebRequest -Uri $url -OutFile ffmpeg.zip -UseBasicParsing
+          Expand-Archive ffmpeg.zip -DestinationPath ffmpeg-tmp
+          New-Item -ItemType Directory -Force -Path bin | Out-Null
+          Get-ChildItem ffmpeg-tmp -Recurse -Include ffmpeg.exe, ffprobe.exe |
+            ForEach-Object { Copy-Item $_.FullName -Destination bin }
+          Remove-Item ffmpeg.zip, ffmpeg-tmp -Recurse -Force
+          if (-not (Test-Path bin/ffmpeg.exe)) { throw "ffmpeg.exe was not in the archive" }
+          & ./bin/ffmpeg.exe -version | Select-Object -First 1
+
+      # --onefile is what the release ships and what the updater can replace.
+      # It deliberately leaves CUDA out: a one-file build re-extracts its whole
+      # payload on every launch, so bundled CUDA would cost every user startup
+      # time for something only NVIDIA owners can use.
+      - name: Build the exe
+        run: python build_exe.py --onefile
+
+      - name: Check the built exe reports the right version
+        shell: pwsh
+        run: |
+          $exe = "dist/StreamToShorts.exe"
+          if (-not (Test-Path $exe)) { throw "the build produced no exe" }
+          $v = (Get-Item $exe).VersionInfo.FileVersion
+          $want = "${{ steps.tag.outputs.name }}".TrimStart("v")
+          $size = [math]::Round((Get-Item $exe).Length / 1MB)
+          $sha = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLower()
+          Write-Host "version: $v   size: $size MB"
+          Write-Host "sha256:  $sha"
+          if ($v -ne $want) { throw "exe reports $v, expected $want" }
+          "SHA256=$sha" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Publish the release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${{ steps.tag.outputs.name }}"
+          notes="docs/release-notes/${tag}.md"
+          args=(--title "Stream to Shorts ${tag}")
+          if [ -f "$notes" ]; then
+            echo "using $notes"
+            args+=(--notes-file "$notes")
+          else
+            echo "no $notes — generating notes from commits"
+            args+=(--generate-notes)
+          fi
+          # Re-running a release should update it, not fail on "already exists".
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "release exists — replacing the asset"
+            gh release upload "$tag" dist/StreamToShorts.exe --clobber
+          else
+            gh release create "$tag" dist/StreamToShorts.exe "${args[@]}"
+          fi
+
+      - name: Summary
+        shell: bash
+        run: |
+          tag="${{ steps.tag.outputs.name }}"
+          {
+            echo "### Released $tag"
+            echo ""
+            echo "- \`StreamToShorts.exe\` — SHA-256 \`$SHA256\`"
+            echo "- Every installed copy from v1.5.0 onward will offer this build."
+            echo "- <https://github.com/${{ github.repository }}/releases/tag/$tag>"
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,94 @@
+# Cheap checks on every push. Under a minute, no exe built.
+#
+# The point is to catch the mistakes that are expensive specifically because
+# the app updates itself: a version number that disagrees with itself, or an
+# interface file that does not parse. Both look fine locally and only bite
+# once a release is in front of people.
+name: Checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      # build_exe.py refuses to build when these disagree, but that is only
+      # discovered at release time, with a tag already pushed. Here it is a
+      # red tick on the commit that caused it.
+      - name: Version numbers agree
+        run: |
+          python - <<'PY'
+          import re, sys, pathlib
+          v = pathlib.Path("shorts_generator/version.py").read_text(encoding="utf-8")
+          app = re.search(r'APP_VERSION\s*=\s*"([^"]+)"', v).group(1)
+
+          info = pathlib.Path("version_info.txt").read_text(encoding="utf-8", errors="replace")
+          strings = set(re.findall(r"StringStruct\(\s*'(?:File|Product)Version',\s*'([^']+)'", info))
+          tuples = set(re.findall(r"(?:filevers|prodvers)=\((\d+),\s*(\d+),\s*(\d+),\s*\d+\)", info))
+          tuples = {".".join(t) for t in tuples}
+
+          print("APP_VERSION      :", app)
+          print("version_info str :", ", ".join(sorted(strings)) or "none")
+          print("version_info nums:", ", ".join(sorted(tuples)) or "none")
+
+          bad = [v for v in strings | tuples if v != app]
+          if bad:
+              print(f"::error::version_info.txt says {sorted(set(bad))}, version.py says {app}")
+              sys.exit(1)
+          print("agreed")
+          PY
+
+      - name: Python parses
+        run: |
+          python -m compileall -q webapp shorts_generator desktop.py build_exe.py
+          echo "ok"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Interface scripts parse
+        run: |
+          for f in webapp/static/*.js; do
+            node --check "$f" || exit 1
+            echo "ok  $f"
+          done
+
+      # Everything the page can ask the server to open is looked up by name in
+      # an allowlist. A link added to the interface without a matching entry
+      # is a button that silently does nothing.
+      - name: Every link the page opens is allowlisted
+        run: |
+          python - <<'PY'
+          import re, sys, pathlib
+          server = pathlib.Path("webapp/server.py").read_text(encoding="utf-8")
+          block = re.search(r"EXTERNAL_LINKS\s*=\s*\{(.*?)\}", server, re.S).group(1)
+          known = set(re.findall(r'"([^"]+)"\s*:', block))
+
+          used = set()
+          for name in ("app.js", "index.html"):
+              text = pathlib.Path("webapp/static", name).read_text(encoding="utf-8")
+              used |= set(re.findall(r'openExternal\(\s*"([^"]+)"', text))
+              used |= set(re.findall(r'data-open="([^"]+)"', text))
+
+          print("allowlisted:", ", ".join(sorted(known)))
+          print("used by UI :", ", ".join(sorted(used)))
+          missing = used - known
+          if missing:
+              print(f"::error::the interface opens {sorted(missing)}, which EXTERNAL_LINKS does not define")
+              sys.exit(1)
+          print("all accounted for")
+          PY
