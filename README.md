@@ -120,6 +120,23 @@ command-line script that crops talking-head videos. That origin is why GitHub
 lists its authors as contributors here — their commits are genuinely in this
 repo's history, and the licence keeps them credited.
 
+Rather than assert a boundary, here is the measured one. `git blame` over the
+current tree, 14,020 lines:
+
+| | Lines | Share |
+|---|---:|---:|
+| **Parth Bhadana** | **12,519** | **89.3%** |
+| Anil Matcha (base) | 1,175 | 8.4% |
+| Arael Espinosa | 204 | 1.5% |
+| LathissKhumar | 122 | 0.9% |
+
+Code only, excluding documentation: **88.3%** mine. Since the fork point
+(`c30376e`, 29 Jul 2026): **96 of 117 commits**, **+12,709 / −358 lines**, and
+**27 of the 48 files** did not exist before.
+
+Run `git blame` yourself — that is rather the point of quoting a number instead
+of a claim.
+
 The boundary is easy to draw. **Upstream gave a CLI that face-crops a single
 speaker. Everything that makes this a stream tool, and everything that makes it
 an application, is mine:**
@@ -473,6 +490,29 @@ The published `StreamToShorts.exe` also carries ffmpeg and ffprobe (the
 [gyan.dev](https://www.gyan.dev/ffmpeg/builds/) essentials build), which are licensed under the
 GPL v3 — not MIT. That covers the bundled binaries only; this repository's own
 source stays MIT, and building from source pulls in no ffmpeg at all.
+
+---
+
+## Credits
+
+**[Anil Chandra Naidu Matcha](https://github.com/Anil-matcha)** — the original
+project this forks. The CLI pipeline and the highlight-ranking idea are his, and
+1,175 of his lines survive here. Worth being precise about where: the largest
+blocks are in `highlights.py`, `local/clipper.py`, `pipeline.py` and `muapi.py`.
+
+**[Arael Espinosa](https://github.com/cl8dep)** — *"add gemini local llm and
+local caches"*. 87 lines in `local/transcriber.py`, 65 in `local/downloader.py`,
+29 in `local/llm.py`. That commit is the seed of local mode: the Gemini path
+this app still runs on, and the one the Groq fallback was later built beside.
+
+**LathissKhumar** — two commits hardening local mode: 77 lines making the
+highlight JSON parsing survive bad model output, plus the VAD-off default and a
+CUDA fallback in `local/transcriber.py`. The VAD default is still what ships.
+
+Their work is in this repository because it earned its place, and the MIT
+licence keeps their names on it. Everything else — the desktop application, the
+stream-aware ranking, the renderers, the job runner, the interface, the
+packaging — is mine.
 
 ---
 
