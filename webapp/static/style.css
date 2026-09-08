@@ -1924,3 +1924,16 @@ body.player-on .player-body { transform: none; }
   background: rgba(255, 255, 255, .06);
 }
 .g-ver { margin: -8px 12px 12px; font-size: 10.5px; color: var(--text-3); }
+
+/* Version in the masthead, beside the name. Quiet enough to ignore, present
+   enough that "what version are you on" never needs a hunt. */
+.logo-ver {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .02em;
+  color: var(--text-3);
+  padding: 2px 6px;
+  border-radius: var(--pill);
+  background: rgba(255, 255, 255, .07);
+}
+@media (max-width: 700px) { .logo-ver { display: none; } }

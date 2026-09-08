@@ -633,6 +633,8 @@ $("welcome").addEventListener("keydown", (e) => {
 
 let updateState = null;
 let updatePoll = null;
+let announcedVersion = null;   // the version we have already mentioned
+let lastCheckAt = 0;
 
 // Shown from a local endpoint rather than waiting on the update check, so the
 // build number is there with no network and is the first thing to hand when
@@ -642,6 +644,7 @@ async function showVersion() {
     const d = await api("/api/version");
     $("wVer").textContent = "v" + d.version;
     $("gVer").textContent = "Version " + d.version;
+    $("topVer").textContent = "v" + d.version;
   } catch (e) { /* the number is not worth an error */ }
 }
 showVersion();
@@ -667,6 +670,14 @@ async function checkUpdate(loud) {
     const waiting = d.status === "update";
     $("updateDot").classList.toggle("hidden", !waiting);
     $("gUpdateBadge").classList.toggle("hidden", !waiting);
+
+    // Someone who leaves the app open all day would otherwise only ever learn
+    // about a release by restarting. Announced once per version, so a long
+    // session does not get nagged every half hour about the same build.
+    if (waiting && d.latest && d.latest !== announcedVersion) {
+      announcedVersion = d.latest;
+      if (!loud) toast(`Version ${d.latest} is out — click the update button to install it.`);
+    }
 
     if (waiting || d.status === "ahead") {
       const ahead = d.status === "ahead";
@@ -787,7 +798,28 @@ async function checkUpdateAndShow() {
 $("updateBtn").onclick = checkUpdateAndShow;
 $("gUpdate").onclick = checkUpdateAndShow;
 
+function checkUpdateQuietly() {
+  // GitHub allows 60 unauthenticated calls an hour and this is one app on one
+  // PC, so half-hourly is nowhere near the limit -- but the guard keeps a
+  // window that is focused and blurred repeatedly from turning into a stream
+  // of requests.
+  const now = Date.now();
+  if (now - lastCheckAt < 10 * 60 * 1000) return;
+  lastCheckAt = now;
+  checkUpdate(false);
+}
+
+lastCheckAt = Date.now();
 checkUpdate(false);
+
+// While the app is open: every half hour, and whenever the window is looked
+// at again after being away. A release published at noon reaches someone who
+// opened the app at nine without them restarting it.
+setInterval(checkUpdateQuietly, 30 * 60 * 1000);
+window.addEventListener("focus", checkUpdateQuietly);
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) checkUpdateQuietly();
+});
 
 openWelcome();
 
