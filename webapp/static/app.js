@@ -1641,3 +1641,43 @@ $("fbSave").onclick = async () => {
 };
 // Clips made in earlier sessions are still on disk — show them straight away.
 loadLibrary();
+
+// ---------------------------------------------------------------- language
+//
+// English is what a fresh install shows. I18N only departs from it once the
+// user has picked something, and it remembers that pick per browser profile.
+
+(function initLanguage() {
+  const sel = $("uiLang");
+  if (!sel || !window.I18N) return;
+
+  sel.innerHTML = I18N.codes
+    .map((c) => `<option value="${c}">${esc(I18N.name(c))}</option>`)
+    .join("");
+  sel.value = I18N.lang;
+  sel.onchange = () => I18N.set(sel.value);
+
+  // Most of this UI is drawn after load -- clip cards, the library, the
+  // upload panel. Rather than teaching every render function to translate,
+  // watch for what they insert and translate that. The guard matters: apply()
+  // rewrites text nodes, which the observer would otherwise see as more work
+  // and hand straight back to apply().
+  let inside = false;
+  const observer = new MutationObserver((records) => {
+    if (inside || I18N.lang === "en") return;
+    inside = true;
+    try {
+      records.forEach((r) => {
+        r.addedNodes.forEach((n) => {
+          if (n.nodeType === 1) I18N.apply(n);
+        });
+      });
+    } finally {
+      // Let this batch's own mutations settle before listening again.
+      setTimeout(() => { inside = false; }, 0);
+    }
+  });
+  observer.observe(document.body, { childList: true, subtree: true });
+
+  I18N.apply(document.body);
+})();
