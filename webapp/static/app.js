@@ -652,7 +652,11 @@ async function checkUpdate(loud) {
     updateState = d;
     renderVersionRow(d);
 
-    if (d.status === "update" || d.status === "rollback") {
+    const waiting = d.status === "update" || d.status === "rollback";
+    $("updateDot").classList.toggle("hidden", !waiting);
+    $("gUpdateBadge").classList.toggle("hidden", !waiting);
+
+    if (waiting) {
       const verb = d.status === "rollback" ? "Roll back to" : "Version";
       showUpdate(`${verb} ${d.latest} is available`,
                  `You have ${d.current}. ${fmtMB(d.size)} download.`);
@@ -744,6 +748,20 @@ $("wuNotes").onclick = () => openExternal("releases");
 if ($("verCheck")) {
   $("verCheck").onclick = () => checkUpdate(true);
 }
+
+// Asking from the masthead or the sidebar re-checks, then puts the answer
+// where the answer lives -- on the launch card, next to the button that acts
+// on it -- rather than leaving the user to find it.
+async function checkUpdateAndShow() {
+  toast("Checking for updates…");
+  await checkUpdate(true);
+  if (updateState && (updateState.status === "update" || updateState.status === "rollback")) {
+    openWelcome();
+    $("wUpdate").scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }
+}
+$("updateBtn").onclick = checkUpdateAndShow;
+$("gUpdate").onclick = checkUpdateAndShow;
 
 checkUpdate(false);
 

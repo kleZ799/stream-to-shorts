@@ -147,6 +147,9 @@ window.I18N = (function () {
       "Email address copied": "ईमेल पता कॉपी हो गया",
       "Discord": "डिस्कॉर्ड",
       "Join the server": "सर्वर जॉइन करें",
+      "Check for updates": "अपडेट देखें",
+      "Checking for updates…": "अपडेट देखे जा रहे हैं…",
+      "Version": "वर्शन",
     },
 
     // ---------------------------------------------------------------- Español
@@ -280,6 +283,9 @@ window.I18N = (function () {
       "Email address copied": "Dirección de correo copiada",
       "Discord": "Discord",
       "Join the server": "Únete al servidor",
+      "Check for updates": "Buscar actualizaciones",
+      "Checking for updates…": "Buscando actualizaciones…",
+      "Version": "Versión",
     },
 
     // -------------------------------------------------------------- Português
@@ -413,6 +419,9 @@ window.I18N = (function () {
       "Email address copied": "Endereço de e-mail copiado",
       "Discord": "Discord",
       "Join the server": "Entre no servidor",
+      "Check for updates": "Procurar atualizações",
+      "Checking for updates…": "Procurando atualizações…",
+      "Version": "Versão",
     },
 
     // --------------------------------------------------------------- Français
@@ -546,6 +555,9 @@ window.I18N = (function () {
       "Email address copied": "Adresse e-mail copiée",
       "Discord": "Discord",
       "Join the server": "Rejoindre le serveur",
+      "Check for updates": "Rechercher des mises à jour",
+      "Checking for updates…": "Recherche de mises à jour…",
+      "Version": "Version",
     },
 
     // ---------------------------------------------------------------- Deutsch
@@ -679,6 +691,9 @@ window.I18N = (function () {
       "Email address copied": "E-Mail-Adresse kopiert",
       "Discord": "Discord",
       "Join the server": "Server beitreten",
+      "Check for updates": "Nach Updates suchen",
+      "Checking for updates…": "Suche nach Updates…",
+      "Version": "Version",
     },
 
     // ------------------------------------------------------------------ 日本語
@@ -812,6 +827,9 @@ window.I18N = (function () {
       "Email address copied": "メールアドレスをコピーしました",
       "Discord": "Discord",
       "Join the server": "サーバーに参加",
+      "Check for updates": "アップデートを確認",
+      "Checking for updates…": "アップデートを確認中…",
+      "Version": "バージョン",
     },
   };
 

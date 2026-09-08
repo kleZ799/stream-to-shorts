@@ -1900,3 +1900,17 @@ body.player-on .player-body { transform: none; }
 .wu-actions { display: flex; gap: 8px; margin-top: 11px; }
 .wu-actions.hidden { display: none; }
 .wu-actions .btn { flex: 1 1 auto; }
+
+/* A dot on the masthead's update button. The point of it is to say there is
+   something new without the user having to go and ask -- so it appears only
+   when a check has actually found a newer release, never on a hunch. */
+.ibtn.dotted { position: relative; }
+.ibtn .dot {
+  position: absolute;
+  top: 7px; right: 7px;
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--blue);
+  box-shadow: 0 0 0 2px var(--bg);
+}
+.ibtn .dot.hidden { display: none; }
