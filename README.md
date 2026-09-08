@@ -89,6 +89,11 @@ change how it works.
 > study companion to this repo — the pipeline stage by stage, the ranking prompts,
 > the three renderers, the job runner, the frontend, and why each is built the way
 > it is. Written to be read end-to-end.
+>
+> 🎓 **Preparing to explain this to someone?** [CONCEPTS.md](CONCEPTS.md) covers the
+> ideas rather than the files — the AI/ML and computer-science concepts this project
+> actually uses, each anchored to a real decision in the code, plus the questions an
+> interviewer is likely to ask about it.
 
 ---
 

@@ -10,7 +10,10 @@
 A complete walkthrough of this codebase: what it does, how it does it, what
 technology it uses, and *why* each piece is shaped the way it is.
 
-The [README](README.md) is the pitch. This is the map. Everything here was read
+The [README](README.md) is the pitch. This is the map.
+[CONCEPTS.md](CONCEPTS.md) is the theory — the same system described in terms of
+the AI/ML and CS concepts behind it, for explaining the project rather than
+navigating it. Everything here was read
 off the current source, so where the README and the code disagree, this file
 follows the code and says so ([§17](#17-rough-edges-and-stale-docs)).
 

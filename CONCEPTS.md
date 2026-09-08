@@ -1,0 +1,707 @@
+# The concepts behind Stream → Shorts
+
+**What this document is for.** [HOW_IT_WORKS.md](HOW_IT_WORKS.md) explains *this
+codebase*. This one explains the *ideas* the codebase is made of — the AI/ML and
+computer-science concepts you are actually using — so that when someone asks
+"what is this and how does it work", you can answer at whatever depth they push
+to.
+
+**How to use it.** Every concept below is anchored to a real file and a real
+decision in this repo. That anchoring is the point: "I used a producer–consumer
+queue" is a phrase anyone can memorise, but "I used a single-worker queue
+because ffmpeg and Whisper are both CPU-saturating, so a second worker would
+have made both jobs slower rather than finishing either sooner" is an answer
+that survives a follow-up question.
+
+**The honest framing.** You did not invent Whisper or Gemini. What you built is
+a *system* around them, and systems work is where almost every interesting
+decision in this project lives — caching, failure handling, concurrency,
+security boundaries, prompt design, degradation. Say that plainly. It is a
+stronger position than pretending otherwise, and it is where your real
+engineering is.
+
+---
+
+## Contents
+
+1. [The 60-second answer](#1-the-60-second-answer)
+2. [The system in one picture](#2-the-system-in-one-picture)
+3. [AI/ML: speech recognition](#3-aiml-speech-recognition)
+4. [AI/ML: working with LLMs](#4-aiml-working-with-llms)
+5. [AI/ML: computer vision](#5-aiml-computer-vision)
+6. [CS: concurrency and the job model](#6-cs-concurrency-and-the-job-model)
+7. [CS: the web layer](#7-cs-the-web-layer)
+8. [CS: algorithms actually used here](#8-cs-algorithms-actually-used-here)
+9. [CS: caching and idempotency](#9-cs-caching-and-idempotency)
+10. [CS: reliability and failure design](#10-cs-reliability-and-failure-design)
+11. [CS: security boundaries](#11-cs-security-boundaries)
+12. [CS: operating systems and packaging](#12-cs-operating-systems-and-packaging)
+13. [CS: internationalisation](#13-cs-internationalisation)
+14. [Questions you should expect](#14-questions-you-should-expect)
+15. [What you would do next](#15-what-you-would-do-next)
+
+---
+
+## 1. The 60-second answer
+
+> It takes a multi-hour livestream VOD and produces upload-ready vertical
+> Shorts. Three stages: transcribe the audio with Whisper, have an LLM rank the
+> transcript for clippable moments, then cut and re-frame those spans with
+> ffmpeg into 9:16 with the webcam stacked over the gameplay.
+>
+> Everything runs locally except one LLM call. It ships as a Windows desktop
+> app — a FastAPI server in a native webview window, packaged with PyInstaller.
+>
+> The interesting parts aren't the models, they're everything around them:
+> a 3h47m VOD does not fit in a context window, so ranking is chunked and
+> checkpointed; the LLM is unreliable, so there's a retry budget and a
+> degradation path; transcription is the expensive step, so there are five
+> layers of caching that make every re-rank free.
+
+If they want less, stop after the first paragraph. If they want more, the
+answer to "what was hard?" is in [§14](#14-questions-you-should-expect).
+
+---
+
+## 2. The system in one picture
+
+```
+YouTube URL ──yt-dlp──> source.mp4 ──ffmpeg──> 16kHz mono audio
+                                                     │
+                                          faster-whisper (CTranslate2)
+                                                     │
+                                              transcript (.srt)  ←── cached
+                                                     │
+                                    ┌────────────────┴──────────────┐
+                                    │  too long for one LLM call    │
+                                    │  → chunk into 20-min windows  │
+                                    │    with 60s overlap           │
+                                    └────────────────┬──────────────┘
+                                                     │
+                                        LLM ranks each chunk  ←── checkpointed
+                                                     │
+                                     greedy overlap dedupe → top N
+                                                     │
+                                        LLM writes SEO metadata
+                                                     │
+                              OpenCV finds the face ──> crop geometry
+                                                     │
+                                    ffmpeg: cut + stack + scale
+                                                     │
+                                            1080×1920 h264 .mp4
+```
+
+The single most important property of this diagram: **cost increases sharply
+left to right in time, and the expensive stages are cached.** Downloading is
+minutes, transcription is minutes-to-tens-of-minutes, ranking is seconds-to-
+minutes of API time, rendering is ~30s per clip. So the caches are placed to
+make the *second* run of anything nearly free.
+
+---
+
+## 3. AI/ML: speech recognition
+
+**File:** `shorts_generator/local/transcriber.py`
+
+### What Whisper is
+
+An **encoder–decoder Transformer** trained for **automatic speech recognition
+(ASR)**. The encoder consumes a log-Mel spectrogram of 30-second audio windows;
+the decoder autoregressively emits text tokens. It is a **sequence-to-sequence**
+model, not a classifier — which is exactly why it can hallucinate: nothing
+constrains it to have heard anything.
+
+**faster-whisper** is a reimplementation on **CTranslate2**, an inference engine
+that applies operator fusion, batching and quantisation. It is not a different
+model, it is the same weights executed more efficiently.
+
+### Quantisation
+
+The code picks `float16` on GPU and `int8` on CPU.
+
+- **float16** — half-precision floats. GPUs have dedicated hardware for these;
+  half the memory bandwidth of fp32 for near-identical accuracy.
+- **int8** — 8-bit integers. Weights are mapped to a small integer range with a
+  scale factor. Roughly 4x smaller than fp32 and much faster on CPUs with SIMD
+  integer instructions, at a small accuracy cost.
+
+This is **post-training quantisation**: the model was trained in higher
+precision and is being *executed* in lower precision. No retraining involved.
+
+### Beam search
+
+`beam_size=5`. At each decoding step the decoder keeps the 5 highest-probability
+partial sequences rather than committing to the single best token (**greedy
+decoding**). This is a **heuristic search over the output space** — it does not
+guarantee the globally optimal sequence, it just explores more of it. Cost is
+roughly linear in beam width.
+
+### Hallucination, and the bug it caused here
+
+`condition_on_previous_text=False`. Normally Whisper feeds its previous output
+back in as context, which improves coherence — and creates a feedback loop where
+one hallucinated phrase repeats forward through an entire VOD. Disabling it
+limits *propagation*.
+
+It does not prevent *occurrence*, which this project learned the hard way. With
+language on auto-detect, Whisper performs **language identification** and
+re-decides on unclear audio. On a game stream — music beds, effects, silence —
+it drifted, and then generated fluent, confident Korean. A real 3h47m English
+VOD returned **703 of 1097 cues in a language nobody spoke.**
+
+Two mitigations, both in the repo now:
+
+1. **Pin the language** (`language="en"`). Removes the decision entirely.
+2. **Use a bigger model.** `small` hallucinates less than `base`, and on GPU it
+   is also *faster* than `base` — so the accuracy costs nothing.
+
+> **Concept to name in an interview:** this is a **silent failure**. The system
+> produced confident, well-formed, completely wrong output and reported success.
+> Distinguish it from a crash: crashes are cheap because they are loud.
+
+### Voice activity detection (VAD)
+
+VAD segments audio into speech and non-speech to skip silence. It is **off** by
+default here, deliberately: on a stream with game audio under the mic it is too
+aggressive and discards real speech. A precision/recall tradeoff resolved
+against the default.
+
+---
+
+## 4. AI/ML: working with LLMs
+
+**Files:** `shorts_generator/highlights.py`, `shorts_generator/seo.py`,
+`shorts_generator/local/llm.py`
+
+### The context window problem
+
+A 3h47m transcript is far larger than a usable context window, and even where it
+fits, attention quality degrades over very long inputs ("lost in the middle").
+
+**Solution: chunking with overlap.** 20-minute windows, 60-second overlap. The
+overlap exists because a moment straddling a boundary would otherwise be cut in
+half and scored as two weak fragments. Each chunk's timestamps are rebased to
+zero, then offset back after ranking — so the model always reasons about a
+small, self-consistent timeline.
+
+This is the same **sliding window** idea used in signal processing and in
+document chunking for RAG.
+
+### Prompt engineering, concretely
+
+The ranking prompt is not "find good clips". It contains:
+
+- **Role framing** — "elite short-form video editor".
+- **Domain knowledge the model lacks** — how to distinguish streamer speech from
+  game narration in a single mixed audio track with no speaker labels, by
+  register (spoken filler vs written prose).
+- **A hard constraint** — every highlight must contain the streamer's own
+  speech, because the game's audio is not the channel's content.
+- **A ranked rubric** — eight virality signals in priority order.
+- **Output-shape enforcement** — exact JSON schema, no prose.
+
+### Score calibration — a real bug worth telling
+
+The prompt asked for a 0–100 score. Across 96 candidates from one real VOD,
+every score landed between **73 and 95**, standard deviation 5.15, nothing below
+73.
+
+That is **score inflation**, and it made the ranking useless: the difference
+between the clip that shipped 5th and the one that placed 25th was three points,
+well inside the model's own run-to-run variance. The top-5 cut was effectively
+random from a tie.
+
+**Fix: anchor the scale.** Give explicit bands, state that most moments are a
+30–60, and cap the model at one 90+ per chunk. This is **rubric calibration** —
+the same reason human graders get a rubric instead of "score it out of 100".
+
+> **Generalisable claim:** an unanchored numeric scale from an LLM is a *ranking
+> signal with unknown units*. If you are going to threshold or sort on it, you
+> have to pin the scale to something.
+
+### Structured output
+
+`response_mime_type: "application/json"` plus a schema in the prompt, plus a
+tolerant parser (`_parse_json_loose`) that survives markdown fences, plus a
+retry that re-asks more forcefully on a parse failure. **Defence in depth**: the
+model is asked nicely, constrained by the API, and then not trusted anyway.
+
+### Temperature
+
+`0.2`. Low but nonzero. This is a judgement task where you want consistency, not
+creativity — but not fully deterministic either, since the retry path benefits
+from a genuinely different attempt.
+
+### The degradation path
+
+If the SEO call fails, `attach_seo` falls back to deriving metadata from the
+clip's own hook sentence and marks `generated: False`.
+
+**This is graceful degradation, and this project also shows its failure mode.**
+When the LLM was unavailable during a real run, the fallback used a *hallucinated
+Korean transcript line* as the title — which then became the filename on disk.
+Degrading gracefully means the pipeline survives; it does not mean the output is
+good. Anything downstream that treats fallback output as equivalent to real
+output will propagate the degradation.
+
+---
+
+## 5. AI/ML: computer vision
+
+**Files:** `shorts_generator/local/gaming_layout.py`, `clipper.py`
+
+**Haar cascade classifiers** (`cv2.CascadeClassifier` with
+`haarcascade_frontalface_default.xml`). This is *classical* CV, not deep
+learning, and the distinction is worth being able to draw:
+
+- **Haar features** — sums of pixel intensities in adjacent rectangles, capturing
+  edge and line patterns. Computed in constant time using an **integral image**
+  (a summed-area table, so any rectangle sum is 4 lookups).
+- **AdaBoost** — an ensemble of thousands of these weak classifiers, each barely
+  better than chance, combined into a strong one.
+- **Cascade** — the classifiers are ordered into stages; a window failing any
+  stage is rejected immediately. Since most of an image is not a face, most
+  windows die in stage 1. That is where the speed comes from.
+
+**Why this and not a CNN:** it runs fast on CPU, needs no model download, and
+ships inside a PyInstaller bundle as a small XML file. The task is "find the
+approximate face box in a webcam overlay" — a modern detector would be more
+accurate at real cost in size and dependencies. A deliberate accuracy/deployment
+tradeoff, not an oversight.
+
+**Sampling:** the face is located from several frames, not one, and the results
+are aggregated (`from 5/6 samples` in the logs). One frame can catch a blink, a
+turn, or a transition; sampling is cheap variance reduction.
+
+---
+
+## 6. CS: concurrency and the job model
+
+**File:** `webapp/jobs.py`
+
+### Producer–consumer with a single worker
+
+A `queue.Queue` of job ids and **one** daemon `threading.Thread` draining it.
+
+Interviewers will ask why not a pool. The answer: **the work is CPU- and
+IO-saturating already.** Whisper saturates the CPU (or GPU); ffmpeg saturates
+the CPU. Two concurrent jobs would contend for the same resource and both finish
+later — no throughput gain, worse latency, and much harder progress reporting.
+Serial execution is the right call for this workload.
+
+### Daemon threads
+
+`daemon=True` means the thread does not keep the process alive at exit. Correct
+for a desktop app: closing the window should close the app, not block on a
+half-finished render.
+
+### The GIL, and why it does not bite
+
+Python's **Global Interpreter Lock** allows one thread to execute bytecode at a
+time, which normally makes threads useless for CPU-bound work. It is not a
+problem here because the heavy work happens *outside* the interpreter:
+CTranslate2 is C++, ffmpeg is a subprocess, OpenCV is C++. Each releases the GIL
+while working. **Threads are fine when the CPU-bound work is not in Python.**
+
+### asyncio and thread offloading
+
+FastAPI handlers are `async`. An async function that blocks stalls the **entire
+event loop** — every other request included. So blocking calls are pushed to a
+thread pool with `await asyncio.to_thread(...)`.
+
+Know the distinction cold: **`async` is for IO concurrency on one thread;
+threads are for not blocking that thread.** They solve different problems and
+this codebase uses both.
+
+### Progress without shared-memory bugs
+
+The worker thread mutates job state under a `threading.Lock`, and every mutation
+bumps a `_version` integer. The SSE endpoint polls that version and only emits
+when it changes. A **monotonic version counter** is a cheap, correct way to say
+"something changed" without diffing state or racing on it.
+
+---
+
+## 7. CS: the web layer
+
+**File:** `webapp/server.py`
+
+### Why a local web server in a desktop app
+
+The UI is HTML/CSS/JS in a native webview (`pywebview`), talking to `127.0.0.1`.
+You get browser rendering and devtools without shipping Electron. The tradeoffs
+— a bound port, a same-origin story, needing single-instance locking — are the
+cost.
+
+### Server-Sent Events (SSE)
+
+`/api/jobs/{id}/stream` returns `text/event-stream`; the client uses
+`EventSource`.
+
+Be able to justify it over the alternatives:
+
+| | polling | **SSE** | WebSocket |
+|---|---|---|---|
+| direction | client pulls | **server → client** | bidirectional |
+| complexity | trivial | **low** | higher |
+| reconnect | manual | **automatic** | manual |
+| fits progress updates | wastefully | **exactly** | overkill |
+
+Progress is strictly one-directional, so SSE is the right size of tool.
+
+### HTTP range requests
+
+Clip playback returns **`206 Partial Content`** with `Accept-Ranges: bytes` and
+a `Content-Range` header. This is what lets a `<video>` element seek without
+downloading a 56 MB file first — the browser requests byte ranges on demand.
+
+### A real bug that taught the failure mode
+
+After a title rewrite renames a clip's file, the frontend used to look its own
+clip up **by filename** in the response — but the response already carried the
+*new* names. Nothing matched, the update was silently skipped, and the `<video>`
+kept a URL pointing at a file that no longer existed. The browser surfaced that
+404 as `MEDIA_ERR_SRC_NOT_SUPPORTED` — a black player.
+
+**The concept: never use a mutable field as an identity key.** The fix was to
+match on `index`, which a rename does not touch. This is the same reason
+databases use surrogate primary keys rather than natural ones.
+
+---
+
+## 8. CS: algorithms actually used here
+
+### Greedy interval scheduling (dedupe)
+
+`dedupe_highlights()` — sort candidates by score descending, then walk the list
+keeping a clip only if it overlaps ≤50% with everything already kept.
+
+- **Paradigm:** greedy. Locally optimal choice (take the best remaining), never
+  reconsidered.
+- **Complexity:** O(n log n) to sort, then O(n·k) for k kept clips. With n≈96
+  and k≈5–30 that is trivially fast; an interval tree would be the move if n
+  grew by orders of magnitude.
+- **Overlap arithmetic:** `max(start₁,start₂)` to `min(end₁,end₂)`, positive
+  length means they intersect. Standard interval intersection.
+- **Not optimal, and that is fine.** Weighted interval scheduling has an exact
+  DP solution. The greedy answer is good enough because the scores are noisy
+  estimates anyway — optimising precisely against a noisy objective is false
+  precision.
+
+### Sliding window with overlap (chunking)
+
+Covered in [§4](#4-aiml-working-with-llms). Windows of 1200s, stride 1140s.
+
+### Fingerprint-based cache validation
+
+`_checkpoint_fingerprint()` hashes prompt version, duration, chunk count, clip
+count and length constraints into a string. If any input to the computation
+changes, the fingerprint changes, and cached results are correctly discarded.
+
+This is **cache invalidation by input identity** — the same principle behind
+content-addressed storage and build-system caching. When the ranking rubric was
+recalibrated, bumping `PROMPT_VERSION` invalidated every cached chunk, because
+results scored under the old scale are not comparable to results under the new
+one.
+
+---
+
+## 9. CS: caching and idempotency
+
+Five layers, each with its own validity rule:
+
+| Layer | Key | Invalidated by |
+|---|---|---|
+| Source video | video id | never (reused across runs) |
+| Transcript `.srt` | path beside video | source mtime newer than cache |
+| Highlight chunks | fingerprint | any fingerprint input changing |
+| Job state | job id | process restart (restored from disk) |
+| Rendered clips | filename | explicit re-render |
+
+**Cache invalidation by modification time** is the classic approach (it is what
+`make` does). Its weakness is worth knowing: mtime can lie — clock skew, a
+restored backup, a file copied with metadata preserved. Content hashing is
+correct but requires reading the whole file, which for an 11.9 GB video is
+absurd. mtime is the right tradeoff *here*, and you should be able to say why.
+
+**Checkpointing** is what makes long ranking survivable. Each chunk's result is
+written the moment it succeeds, so a failure on chunk 10 of 12 costs one chunk,
+not eleven. This is the same idea as checkpointing in long ML training runs.
+
+**Idempotency:** re-running a job with the same inputs reuses everything cached
+and produces the same output. That property is what makes retrying safe.
+
+---
+
+## 10. CS: reliability and failure design
+
+**File:** `shorts_generator/local/llm.py`
+
+### Exponential backoff
+
+Retry delays of 5s, 10s, 20s, 40s, then capped at 60s. Doubling each time.
+
+**Why exponential rather than fixed:** a service returning 503 is overloaded.
+Retrying at a constant rate keeps the load on and can turn a blip into an
+outage — the **thundering herd**. Backing off exponentially gives it room to
+recover.
+
+**Jitter** — randomising the delay — is the standard companion, to stop many
+clients synchronising their retries. Not implemented here; worth naming as a
+known gap if asked, since this is a single-user desktop app where the herd is
+one.
+
+### Retry budget, sized against reality
+
+Originally 5 attempts ≈ 75 seconds of patience. A real Gemini capacity spike
+outlasted it and nearly destroyed a run that had already paid for an 11.9 GB
+download and a 29-minute transcription. Raised to 8 attempts ≈ 4.2 minutes.
+
+**The principle: a retry budget should be sized against how long the failure
+actually lasts, and against the cost of losing the work in progress.** Not
+picked as a round number.
+
+### Classifying errors
+
+The retry loop inverts the usual rule: **give up immediately only on errors
+retrying can never fix** (bad API key, malformed request, exhausted daily
+quota), and retry everything else. That is the correct default when failure
+modes are diverse and do not present uniformly in the error string.
+
+Know the taxonomy: **transient** (retry), **permanent** (fail fast), and
+**ambiguous** (the interesting case — did the request actually take effect?).
+
+### Provider fallback
+
+Gemini primary, OpenAI when the daily quota is spent. A **fallback chain**, with
+usage accounting to know when to switch.
+
+### Proving a device works
+
+Restructuring the GPU fallback taught something general. A CUDA device that
+enumerates, and a model that constructs on it, are **both worthless as proof** —
+the failure only appears on the first real inference call. So the fallback has
+to wrap the whole operation, not the setup:
+
+```python
+try:
+    segments, info = _run("cuda", "float16")   # drains the generator
+except Exception:
+    segments, info = _run("cpu", "int8")       # redo everything
+```
+
+> **The concept: a health check that does not exercise the real path is not a
+> health check.** This is the same reason a database "connection successful"
+> check tells you very little about whether queries will work.
+
+---
+
+## 11. CS: security boundaries
+
+### Path traversal
+
+Clips are served by filename from a URL. Without containment, `../../` in that
+filename reads arbitrary files off the disk — **directory traversal**, one of
+the oldest web vulnerabilities there is.
+
+The check in `_clip_path()`:
+
+```python
+root = Path(job.out_dir).resolve()
+path = (root / safe).resolve()
+path.relative_to(root)          # raises ValueError if outside
+```
+
+**Both paths are resolved first**, then compared structurally.
+
+The subtlety worth knowing: comparing resolved paths **as strings** with
+`startswith` is a classic bug, because `/data/jobs-evil` starts with
+`/data/jobs`. `Path.relative_to` compares path *components*, which is why it is
+correct. `os.path.basename` strips directory components as a second layer.
+
+### Secrets
+
+API keys live in `%APPDATA%\StreamToShorts\settings.json`, outside the repo,
+never in source. Precedence is environment first, then that file — so CI or a
+power user can override without editing anything.
+
+**Known weakness, and say it before they find it:** the file is plaintext.
+Proper handling would be the Windows Credential Manager / DPAPI. The mitigation
+today is filesystem permissions and the fact that it never leaves the machine.
+
+### Not trusting the model's output
+
+Every field the LLM returns is coerced, clamped and validated before use —
+timestamps bounded to the video duration, clip lengths rejected above
+`MAX_CLIP_SECONDS`, scores clamped to 0–100. **Model output is untrusted input.**
+It is generated text, not a contract, no matter what the schema said.
+
+---
+
+## 12. CS: operating systems and packaging
+
+### Dynamic linking and the DLL search path
+
+The most instructive bug in this project. `pip install nvidia-cublas-cu12
+nvidia-cudnn-cu12` installs DLLs under `site-packages/nvidia/*/bin`. Python 3.8+
+**removed `PATH` and the current directory from the DLL search order on Windows**
+(a security hardening — it closed a DLL-hijacking vector). Libraries are expected
+to call `os.add_dll_directory` explicitly. Torch does. CTranslate2 does not.
+
+Result: installing the libraries changed **nothing**. The GPU enumerated, the
+model constructed, and the first inference died on `cublas64_12.dll is not
+found`.
+
+Concepts in play: **dynamic linking**, **shared library resolution order**,
+**security hardening breaking implicit behaviour**, and — the meta-lesson — *a
+dependency resolved by search path is invisible to any tool that only reads
+imports*, which is exactly why PyInstaller also needed to be told about it
+explicitly.
+
+### Freezing a Python app
+
+PyInstaller bundles interpreter + libraries + code into a distributable.
+
+- **onedir** — a folder. Starts fast, already unpacked.
+- **onefile** — a single exe that extracts its entire payload to a temp
+  directory **on every launch**.
+
+That difference drove a real decision here. The CUDA runtime is ~2 GB. In the
+onedir build that is disk space and nothing else. In a onefile build it would be
+re-extracted on every start, by every user — including the majority with no
+NVIDIA card who cannot use it. So the builds deliberately differ: onedir ships
+CUDA, onefile does not, behind an explicit `--cuda/--no-cuda` flag.
+
+**`sys._MEIPASS`** is how frozen code finds its bundled data, since paths
+relative to `__file__` no longer mean anything.
+
+### Single-instance locking
+
+Two copies would fight over the port, the job store and the output directory. A
+lock file / named mutex enforces one. This is **mutual exclusion at process
+scope** rather than thread scope.
+
+---
+
+## 13. CS: internationalisation
+
+**File:** `webapp/static/i18n.js`
+
+### Keying by source string
+
+Translations are keyed by the **English string itself**, not by an invented key
+like `nav.create`.
+
+- **Upside:** markup stays readable, and a missing translation falls back to
+  English automatically instead of rendering a raw key at the user.
+- **Downside:** editing English copy orphans its translations.
+
+A real tradeoff with a real cost — name both sides.
+
+### Preserving the source
+
+Each translated DOM node keeps the English it was born with, in a `WeakMap`.
+Without that, switching Hindi → Japanese would look up *Hindi* text in the
+Japanese table, find nothing, and leave the page stuck. **A transformation you
+intend to reapply must be applied to the original, not to its own output.**
+
+`WeakMap` specifically because keys are DOM nodes — entries are garbage
+collected when the nodes are removed, so it cannot leak.
+
+### Translating what does not exist yet
+
+Most of this UI is rendered dynamically after load. Rather than teaching every
+render function to translate, a **`MutationObserver`** watches for inserted
+nodes and translates them — the **observer pattern**, with a reentrancy guard,
+because the observer's own DOM writes would otherwise retrigger it infinitely.
+
+### Defaulting
+
+English on a fresh install, and the browser locale is deliberately **not**
+consulted — a machine set to another language should not hand a first-run user
+an interface nobody chose. A **product** decision, not a technical one, and
+being able to distinguish those is itself a signal.
+
+---
+
+## 14. Questions you should expect
+
+**"Walk me through what happens when I paste a URL."**
+Follow [§2](#2-the-system-in-one-picture) top to bottom. Mention the caches.
+
+**"Why is it slow?"**
+Transcription dominates — it is the only stage proportional to *video length*
+rather than clip count. Which is why it is cached, and why the GPU path was
+worth fixing (104s → 21s on 900s of audio).
+
+**"How do you handle a 4-hour video when the context window is smaller?"**
+Chunking with overlap, per-chunk checkpointing, then dedupe across chunks.
+Then the honest limitation: independently-scored chunks are not strictly
+comparable, so the global top-N is an approximation. See
+[§15](#15-what-you-would-do-next).
+
+**"What happens when the API fails?"**
+Layered: retry with exponential backoff (8 attempts, ~4 min), then provider
+fallback, then graceful degradation to non-LLM metadata, and checkpointing so
+partial work survives regardless. Then tell them what degradation *cost* —
+the Korean title — because that shows you followed it through.
+
+**"What was the hardest bug?"**
+The GPU one is the best story: three independent silent failures stacked
+(wrong library probed, DLLs unregistered, not bundled), each of which
+individually produced "works, but on CPU" with no error. Second best: score
+inflation, because it required *noticing that correct-looking output was
+meaningless* — the system reported five clips at 94–95 and looked fine.
+
+**"What would you do differently?"**
+See [§15](#15-what-you-would-do-next). Have a real answer; "nothing" is a bad one.
+
+**"Is this just an API wrapper?"**
+Meet it head-on. The models are off-the-shelf; the engineering is the system
+around them — chunking strategy, checkpointing, cache design, failure taxonomy,
+the security boundary on file serving, the packaging tradeoffs. Then give one
+concrete example in depth. The score-calibration bug is the strongest, because
+it required understanding *why* an LLM's numeric output was untrustworthy rather
+than just calling the API.
+
+**"How do you know the clips are actually good?"**
+The honest answer, which is more impressive than a fake one: there is no
+automated quality metric. Ranking quality is judged manually. Building an
+evaluation set — clips labelled by actual retention data from published Shorts —
+is the obvious next step and the only way to make the rubric empirical rather
+than assumed.
+
+---
+
+## 15. What you would do next
+
+Ordered by value, with the reasoning that makes each defensible:
+
+1. **A final cross-chunk ranking pass.** Today each 20-minute chunk is scored
+   independently, so a 90 in chunk 3 and a 90 in chunk 9 are not really
+   comparable — they were assigned by separate calls with separate implicit
+   baselines. One final comparison pass over the surviving candidates would make
+   the global top-N meaningful rather than approximate.
+
+2. **A local LLM fallback.** The failure that nearly killed a real run was
+   *availability*, not quality. A local model via Ollama would never 503 and has
+   no daily quota. Be precise about the tradeoff: on 8 GB of VRAM you can run an
+   8–14B model, and it is genuinely **worse** than Gemini at nuanced judgement
+   over a long transcript. It is the right *fallback*, not the right primary.
+
+3. **Evaluation against real retention data.** Everything about the ranking
+   rubric is currently assumed. Published Shorts produce retention curves; those
+   are labels. Without them, "viral potential" is an untested hypothesis.
+
+4. **Surface degraded output in the UI.** `generated: False` is recorded but a
+   degraded run looks identical to a good one until you notice the filenames.
+
+5. **Jitter on the retry backoff**, and Credential Manager for the API key.
+   Both small, both known gaps.
+
+---
+
+## Related reading
+
+- [HOW_IT_WORKS.md](HOW_IT_WORKS.md) — this codebase, file by file
+- [README.md](README.md) — what it does and how to run it
