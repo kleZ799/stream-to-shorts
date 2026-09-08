@@ -41,7 +41,10 @@ POLL_TIMEOUT_SECONDS = float(os.getenv("MUAPI_POLL_TIMEOUT", "600"))
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
+# Probed against a real free-tier key: 3.6-flash returns 429 (allowance spent),
+# 3.8-flash answers roughly two times in three, 3.5-flash answered every time.
+# The default is the one that replies, not the one with the highest number.
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash")
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "gemini").strip().lower()
 LOCAL_WHISPER_MODEL = os.getenv("LOCAL_WHISPER_MODEL", "base")
 LOCAL_WHISPER_DEVICE = os.getenv("LOCAL_WHISPER_DEVICE", "auto")  # auto / cpu / cuda
