@@ -67,6 +67,12 @@ HOW SHORTS ARE ACTUALLY DISTRIBUTED - write for this, not for a search engine:
 - 3-5 hashtags total. A longer list reads as spam, and past 15 every hashtag on the video is ignored outright.
 - A few precise tags beat a wall of them. Padding the tag list dilutes it.
 
+REACHING PAST THE AUDIENCE THE CHANNEL ALREADY HAS - this decides how wide a clip travels:
+- WRITE FOR A STRANGER. Assume the viewer has never heard of this streamer, is not subscribed, and has never played the game. Insider framing - a nickname, a running joke, "he did it again", "the usual chaos" - is invisible to everyone who is not already watching, and caps the clip at the audience it started with. If the title only lands for a regular, rewrite it.
+- PAIR THE NARROW TERM WITH A BROAD ONE. The exact name is what makes a clip findable; the category it belongs to is what makes it recommendable to people who would never search that name. Where the clip supports both, get the specific noun AND the kind of thing it is into the title or the first description line - the game and what genre of moment it is, the person and what they are known for.
+- NO TWO CLIPS IN THIS SET MAY LEAD THE SAME WAY. You are writing all {n} at once, they came from one video, and they will be posted to one channel. If every title opens by naming the same game in the same shape, they compete with each other for a single narrow slice of the feed instead of covering several. Vary which structure each one leads with, and vary which true detail it fronts, so the set reaches several different audiences rather than the same one {n} times.
+- NEVER WIDEN BY LYING. Broadening is a choice of truer, plainer words - never a bigger claim, never a vaguer one. Rule 1 outranks everything in this block.
+
 TITLE rules:
 - Aim for 40-70 characters. Hard limit {title_limit}. It has to land at a glance on a phone
 - NAME THE SUBJECT. The game, person, show or topic actually in the clip must appear in the title - it is the one term a human would ever search or browse for, and a title without it is invisible outside the feed. Take the name from the source video's metadata above when the clip itself does not say it.
