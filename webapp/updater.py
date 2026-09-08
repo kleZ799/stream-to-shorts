@@ -39,6 +39,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -97,19 +98,51 @@ def can_self_update() -> bool:
     return is_onefile()
 
 
+def _reap(paths, deadline: float) -> None:
+    """Delete files as soon as Windows lets go of them, then stop trying."""
+    pending = [p for p in paths if p.exists()]
+    while pending and time.monotonic() < deadline:
+        still = []
+        for path in pending:
+            try:
+                path.unlink()
+            except FileNotFoundError:
+                pass
+            except OSError:
+                still.append(path)      # someone still has it open
+        pending = still
+        if pending:
+            time.sleep(0.5)
+
+
 def cleanup_previous() -> None:
-    """Delete the file the last update renamed aside. Safe to call always."""
+    """Remove what the last update left behind. Safe to call always.
+
+    The replaced build is a second copy of a 229 MB file, so leaving it around
+    is not a tidiness problem, it is a third of a gigabyte of the user's disk.
+
+    It cannot simply be deleted here: this runs in the *new* process, launched
+    while the old one is still shutting down and still holding its own file
+    open. So the delete is retried on a background thread for a few seconds --
+    long enough to cover the handover, short enough that nothing waits on it.
+    Half-finished downloads are swept the same way, in case a previous attempt
+    was killed mid-flight.
+    """
     exe = exe_path()
     if exe is None:
         return
-    stale = exe.with_name(exe.name + BACKUP_SUFFIX)
-    if stale.exists():
-        try:
-            stale.unlink()
-        except OSError:
-            # Still held open, or gone already. It costs disk, not correctness,
-            # and the next launch gets another go.
-            pass
+    targets = [exe.with_name(exe.name + BACKUP_SUFFIX)]
+    try:
+        targets += [p for p in exe.parent.glob(".update-*.part")]
+    except OSError:
+        pass
+    if not any(p.exists() for p in targets):
+        return
+    threading.Thread(
+        target=_reap,
+        args=(targets, time.monotonic() + 30),
+        daemon=True,
+    ).start()
 
 
 # --- version comparison ---------------------------------------------------
