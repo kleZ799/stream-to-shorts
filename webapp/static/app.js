@@ -599,7 +599,8 @@ $("wBack").onclick = closeWelcome;
 $("gAbout").onclick = openWelcome;
 
 // Same allowlist as the masthead icons -- the button carries a name, not a URL.
-document.querySelectorAll(".w-link[data-open]").forEach((b) => {
+// Any element carrying data-open, not just the launch card's tiles.
+document.querySelectorAll("[data-open]").forEach((b) => {
   b.onclick = () => openExternal(b.dataset.open);
 });
 $("wDonate").onclick = () => openExternal("donate");
@@ -824,6 +825,40 @@ document.addEventListener("visibilitychange", () => {
 openWelcome();
 
 // ---------------------------------------------------------------- source
+
+// ---------------------------------------------------------------- pause
+//
+// Rendering pins every core it can, and a machine that has gone unusable is
+// the most common reason someone kills a run half way. Pausing suspends the
+// ffmpeg processes rather than waiting for the current clip to finish, so the
+// CPU comes back immediately.
+
+let paused = false;
+
+function renderPauseState(on) {
+  paused = !!on;
+  body.classList.toggle("job-paused", paused);
+  $("pauseLabel").textContent = paused ? "Resume" : "Pause";
+  $("pauseBtn").querySelector("use")
+    .setAttribute("href", paused ? "#i-play" : "#i-pause");
+  $("pauseHint").textContent = paused
+    ? "Stopped. Your CPU is free — nothing is lost, the run picks up where it left off."
+    : "Rendering uses every core it can. Pause if you need the machine.";
+}
+
+$("pauseBtn").onclick = async () => {
+  if (!jobId) return;
+  const btn = $("pauseBtn");
+  btn.disabled = true;
+  try {
+    const d = await api(`/api/jobs/${jobId}/${paused ? "resume" : "pause"}`, json("POST", {}));
+    renderPauseState(d.paused);
+  } catch (e) {
+    toast(e.message, true);
+  } finally {
+    btn.disabled = false;
+  }
+};
 
 function setSource(src, name) {
   source = { source: src, name: name || src };
@@ -1066,6 +1101,10 @@ async function run() {
 $("go").onclick = run;
 
 function onUpdate(s) {
+  // The server is the authority on this: a pause survives a page reload, and
+  // the button has to agree with what the worker is actually doing.
+  if (s.paused !== undefined && s.paused !== paused) renderPauseState(s.paused);
+  $("pauseBtn").classList.toggle("hidden", s.status !== "running");
   $("stageLabel").textContent = s.message || s.stage_label;
   $("pct").textContent = Math.round(s.progress * 100) + "%";
   $("barFill").style.transform = `scaleX(${Math.max(0, Math.min(1, s.progress))})`;
@@ -1083,7 +1122,7 @@ function onUpdate(s) {
     el.textContent = s.log.join("\n");
     if (stuck) el.scrollTop = el.scrollHeight;
   }
-  if (s.status === "done" || s.status === "error") finish(s);
+  if (s.status === "done" || s.status === "error") { renderPauseState(false); finish(s); }
 }
 
 let finished = null;

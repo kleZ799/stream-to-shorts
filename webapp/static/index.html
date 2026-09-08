@@ -263,6 +263,12 @@
       </div>
       <div class="bar"><i id="barFill"></i></div>
       <div class="steps" id="steps"></div>
+      <div class="prow">
+        <button class="btn ghost sm" id="pauseBtn" title="Pause the work and give your CPU back">
+          <svg><use href="#i-pause"/></svg><span id="pauseLabel">Pause</span>
+        </button>
+        <span class="phint" id="pauseHint">Rendering uses every core it can. Pause if you need the machine.</span>
+      </div>
       <details class="logwrap">
         <summary>Show the log</summary>
         <div class="log" id="log"></div>
@@ -315,6 +321,29 @@
         <li><b>It watches the whole thing.</b> Transcribes it, ranks the moments, and cuts vertical clips.</li>
         <li><b>Fix anything.</b> Every clip opens in a player where you can move the in and out points, mute it, save it or delete it.</li>
       </ol>
+
+      <h3 class="safe-h">Is this safe? Why Windows warned you</h3>
+      <p class="safe-p">Windows showed <b>&ldquo;Windows protected your PC&rdquo;</b> because this app
+        is not code-signed. A signing certificate costs a few hundred dollars a year, and this is
+        free software given away by one person. SmartScreen is reporting that, not that it found
+        anything wrong &mdash; it says the same about most independent software on its first release.</p>
+      <p class="safe-p">What you can check for yourself:</p>
+      <ul class="safe-l">
+        <li><b>Every line of it is public.</b> The source is on GitHub and the exe is built from it
+          by GitHub&rsquo;s own servers, in the open, with a log anyone can read.</li>
+        <li><b>The download is checksummed.</b> Each release publishes a SHA-256 for the exe, and
+          the app verifies it when updating itself.</li>
+        <li><b>It works with the network off.</b> Transcribing and ranking run on this PC. It talks
+          to YouTube to fetch a video, to your AI provider to rank moments, and to GitHub to check
+          for updates. Nothing else, and none of your video leaves the machine.</li>
+      </ul>
+      <p class="safe-p">The black windows that used to flash open during a run were ffmpeg, the video
+        tool doing the cutting. They are hidden now &mdash; that was ours, and it was alarming for
+        no reason.</p>
+      <div class="safe-row">
+        <button class="btn ghost sm" data-open="repo"><svg><use href="#i-github"/></svg><span>Read the source</span></button>
+        <button class="btn ghost sm" data-open="releases"><svg><use href="#i-download"/></svg><span>Releases and checksums</span></button>
+      </div>
     </section>
 
   </main>

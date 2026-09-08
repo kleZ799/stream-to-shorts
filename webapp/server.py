@@ -864,6 +864,35 @@ async def save_clip(job_id: str, filename: str, req: SaveClipRequest) -> dict:
 
 
 
+# --- pausing a run --------------------------------------------------------
+
+@app.post("/api/jobs/{job_id}/pause")
+async def pause_job(job_id: str) -> dict:
+    """Suspend the work, rather than just declining to start more of it.
+
+    Rendering pins every core it can, and someone whose machine has become
+    unusable needs it back now — not after the current clip finishes.
+    """
+    job = STORE.get(job_id)
+    if not job:
+        raise HTTPException(404, "No such job")
+    if job.status != "running":
+        raise HTTPException(400, "That run is not going.")
+    from shorts_generator import proc
+    proc.pause()
+    return {"paused": True}
+
+
+@app.post("/api/jobs/{job_id}/resume")
+async def resume_job(job_id: str) -> dict:
+    job = STORE.get(job_id)
+    if not job:
+        raise HTTPException(404, "No such job")
+    from shorts_generator import proc
+    proc.resume()
+    return {"paused": False}
+
+
 # --- updates --------------------------------------------------------------
 #
 # The page never supplies a URL. It asks "is there an update", and asks the

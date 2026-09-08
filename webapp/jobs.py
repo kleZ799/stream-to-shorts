@@ -28,6 +28,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional
 
+from shorts_generator import proc
 from shorts_generator.layout_spec import LayoutSpec
 
 from shorts_generator import user_config
@@ -97,6 +98,31 @@ def safe_stem(title: str, fallback: str = "clip") -> str:
     if not stem or stem.lower() in _RESERVED_STEMS:
         return fallback
     return stem
+
+
+def run_folder_name(title: str, when: float, job_id: str) -> str:
+    """The name a run's folder should carry.
+
+    Job ids are what the code needs; "0f83f76b5623" is not what a person needs
+    when ten of them are sitting in one window and they are trying to find the
+    clips from a particular video. The title they already recognise goes first,
+    the date disambiguates two runs of the same video, and the id is dropped
+    entirely -- the manifest inside still carries it, so nothing depends on
+    reading it off the folder.
+    """
+    stamp = time.strftime("%Y-%m-%d", time.localtime(when))
+    stem = safe_stem(title or "", fallback="")
+    return f"{stem} ({stamp})" if stem else f"run {stamp} {job_id[:6]}"
+
+
+def unique_dir(parent: Path, name: str) -> Path:
+    """`name`, then `name (2)`, … — the first folder name not already taken."""
+    candidate = parent / name
+    n = 2
+    while candidate.exists():
+        candidate = parent / f"{name} ({n})"
+        n += 1
+    return candidate
 
 
 def _unique_path(folder: Path, stem: str, suffix: str) -> Path:
@@ -223,6 +249,7 @@ class Job:
             "shorts_dir": self.out_dir,
             "created_at": self.created_at,
             "restored": self.restored,
+            "paused": self.status == "running" and proc.is_paused(),
             "log": self.log[-60:],
             "version": self._version,
         }
@@ -508,6 +535,10 @@ class JobStore:
                     job.log.append(traceback.format_exc())
                     job._version += 1
             finally:
+                # A job that ended while paused must not leave the gate shut,
+                # or the next one starts and immediately blocks on a pause
+                # nobody can see or lift.
+                proc.clear()
                 self._queue.task_done()
 
     def _execute(self, job: Job) -> None:
@@ -547,6 +578,7 @@ class JobStore:
                 with self._lock:
                     job.video_meta = meta
                     job._version += 1
+                self._name_folder(job)
 
             # Explicit spans: the user already told us what to cut, so there is
             # nothing to transcribe and nothing to rank. Straight to rendering.
@@ -614,6 +646,32 @@ class JobStore:
             shorts = render_highlights(source_path, top, job.spec, out_dir=job.out_dir)
 
         self._finalize(job, shorts, all_highlights)
+
+    def _name_folder(self, job: Job) -> None:
+        """Give this run a folder named after the video, before it renders.
+
+        Called once the metadata is in and nothing has been written yet, so
+        this is a choice of name rather than a rename of something in use.
+        """
+        title = job.source_title
+        if not title or job.folder:
+            return
+        try:
+            root = user_config.shorts_dir()
+            wanted = unique_dir(root, run_folder_name(title, job.created_at, job.id))
+            existing = Path(user_config.shorts_dir() / job.id)
+            if existing.exists():
+                existing.rename(wanted)     # nothing in it yet, but be tidy
+            else:
+                wanted.mkdir(parents=True, exist_ok=True)
+            with self._lock:
+                job.folder = str(wanted)
+                job._version += 1
+            print(f"[jobs] clips for this run go to: {wanted.name}", flush=True)
+        except OSError as e:
+            # A name is a convenience; losing it must not cost the run.
+            print(f"[jobs] could not name the folder after the video ({e}) — "
+                  f"using the run id", flush=True)
 
     def _finalize(self, job: Job, shorts: List[Dict], all_highlights: List[Dict]) -> None:
         rendered = []
