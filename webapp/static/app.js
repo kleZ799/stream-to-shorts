@@ -378,11 +378,19 @@ async function refreshUsage() {
   } catch (_) { /* the app still works without a usage panel */ }
 }
 
+// A table, not a ternary: with three providers "gemini or else openai" sends
+// Groq users to OpenAI's signup page, which is a dead end they have to work
+// out for themselves.
+const KEY_LINKS = {
+  gemini: ["Get a free Gemini key →", "https://aistudio.google.com/apikey"],
+  groq:   ["Get a free Groq key →",   "https://console.groq.com/keys"],
+  openai: ["Get an OpenAI key →",     "https://platform.openai.com/api-keys"],
+};
+
 function keyLinkFor(provider) {
-  const gem = provider === "gemini";
-  $("keyLink").textContent = gem ? "Get a free Gemini key →" : "Get an OpenAI key →";
-  $("keyLink").href = gem ? "https://aistudio.google.com/apikey"
-                          : "https://platform.openai.com/api-keys";
+  const [label, href] = KEY_LINKS[provider] || KEY_LINKS.gemini;
+  $("keyLink").textContent = label;
+  $("keyLink").href = href;
 }
 $("setProvider").onchange = () => keyLinkFor($("setProvider").value);
 

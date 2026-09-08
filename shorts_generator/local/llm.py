@@ -8,6 +8,7 @@ from ..config import (
     current_model,
     current_provider,
     require_gemini_key,
+    require_groq_key,
     require_openai_key,
 )
 
@@ -103,6 +104,47 @@ def call_openai_llm(prompt: str) -> str:
         messages=[{"role": "user", "content": prompt}],
     )
     usage.record("openai", model)
+    return response.choices[0].message.content or ""
+
+
+GROQ_BASE_URL = "https://api.groq.com/openai/v1"
+
+
+def call_groq_llm(prompt: str) -> str:
+    """Groq backend: open-weight models on Groq's own hardware, free tier.
+
+    Groq speaks the OpenAI Chat Completions API, so this reuses the `openai`
+    client with a different base_url rather than hand-rolling HTTP. No new
+    dependency, no second response parser to keep correct.
+
+    The point of this provider is not that it is better than Gemini -- on the
+    ranking task it is roughly comparable and on paper slightly behind. The
+    point is that it is *somewhere else*. When Google returns 503 because
+    Google is busy, no amount of retrying Google helps, and Groq's capacity
+    has nothing to do with Google's.
+
+    Free-tier limits worth knowing, because they shape what fits: 30 requests
+    per minute, 1000 per day, and 8000 tokens per minute. That last one binds
+    first -- one ranking chunk is roughly 6-7k tokens in and out together, so
+    this runs at about one chunk a minute.
+    """
+    try:
+        from openai import OpenAI  # type: ignore
+    except ImportError as e:
+        raise RuntimeError(
+            "openai is required to talk to Groq (it speaks the same API). "
+            "Install it with:\n    pip install -r requirements-local.txt"
+        ) from e
+
+    model = current_model("groq")
+    client = OpenAI(api_key=require_groq_key(), base_url=GROQ_BASE_URL)
+    response = client.chat.completions.create(
+        model=model,
+        temperature=0.2,          # same as Gemini's: judgement, not invention
+        response_format={"type": "json_object"},
+        messages=[{"role": "user", "content": prompt}],
+    )
+    usage.record("groq", model)
     return response.choices[0].message.content or ""
 
 
@@ -221,11 +263,41 @@ def _openai_is_configured() -> bool:
         return False
 
 
-def _switch_to_openai(why: str) -> None:
+def _groq_is_configured() -> bool:
+    try:
+        return bool(require_groq_key())
+    except RuntimeError:
+        return False
+
+
+# Who to try when the preferred provider gives up, in order. Groq before
+# OpenAI because Groq's free tier costs nothing and OpenAI's does not exist:
+# falling back should not quietly start spending money.
+_LADDER = (
+    ("groq", _groq_is_configured),
+    ("openai", _openai_is_configured),
+)
+
+
+def _switch_to(provider: str, why: str) -> None:
     global _fallback_provider
-    _fallback_provider = "openai"
-    print(f"[llm] {why} — continuing on OpenAI ({current_model('openai')})",
-          flush=True)
+    _fallback_provider = provider
+    print(f"[llm] {why} — continuing on {provider} "
+          f"({current_model(provider)})", flush=True)
+
+
+def _next_provider(why: str) -> Optional[str]:
+    """Move to the first configured fallback, or None if there is none."""
+    for name, configured in _LADDER:
+        if configured():
+            _switch_to(name, why)
+            return name
+    return None
+
+
+def _switch_to_openai(why: str) -> None:
+    # Kept as the old name for callers outside this module.
+    _switch_to("openai", why)
 
 
 def reset_fallback() -> None:
@@ -237,33 +309,53 @@ def reset_fallback() -> None:
 def call_local_llm(prompt: str) -> str:
     """Dispatch to the configured local LLM provider.
 
-    When Gemini's daily allowance runs out mid-run, hand the rest of the run
-    to OpenAI rather than losing a download and a transcription to a quota
-    that will not come back for hours. Without an OpenAI key there is nothing
-    to fall back to, so the original error stands.
+    When Gemini stops answering mid-run, hand the rest of the run to whoever
+    else is configured rather than losing a download and a transcription.
+    There are two distinct ways it stops, and they need different handling:
+
+    - **Quota (429).** The allowance is gone until it resets. Retrying is
+      pointless, so switch immediately.
+    - **Capacity (503).** Google is busy. `call_gemini_llm` already retries
+      this for about four minutes, and if it is *still* refusing after that,
+      more retries against the same busy service will not help either. A
+      different provider will, because its capacity is unrelated.
+
+    That second case is the one that matters. A real run reached chunk 9 of 12
+    with an 11.9GB download and a 29-minute transcription already paid for,
+    and came within one attempt of losing all of it to a capacity spike.
     """
     provider = _fallback_provider or current_provider()
 
     if provider == "openai":
         return call_openai_llm(prompt)
+    if provider == "groq":
+        return call_groq_llm(prompt)
     if provider != "gemini":
         raise RuntimeError(
-            f"Unknown LLM_PROVIDER={provider!r}. Use 'openai' or 'gemini'."
+            f"Unknown LLM_PROVIDER={provider!r}. Use 'gemini', 'groq' or 'openai'."
         )
 
     if usage.is_exhausted("gemini", current_model("gemini")):
-        if _openai_is_configured():
-            _switch_to_openai("today's Gemini quota is already spent")
-            return call_openai_llm(prompt)
+        if _next_provider("today's Gemini quota is already spent"):
+            return call_local_llm(prompt)
         raise DailyQuotaExceeded(
-            "Gemini's free-tier daily quota is already used up for today. "
-            "It resets at midnight US Pacific — or add an OpenAI key to keep going."
+            "Gemini's free-tier daily quota is already used up for today. It "
+            "resets at midnight US Pacific — or add a free Groq key "
+            "(https://console.groq.com) to keep going."
         )
 
     try:
         return call_gemini_llm(prompt)
     except DailyQuotaExceeded:
-        if not _openai_is_configured():
+        if not _next_provider("Gemini's daily quota ran out"):
             raise
-        _switch_to_openai("Gemini's daily quota ran out")
-        return call_openai_llm(prompt)
+        return call_local_llm(prompt)
+    except Exception as e:
+        # Everything else reaching here has already survived the full retry
+        # budget inside call_gemini_llm, so it is not a blip. Permanent errors
+        # -- a bad key, a withdrawn model -- would fail on another provider
+        # too, but failing over costs one request and losing the run costs
+        # half an hour, so the trade is worth making either way.
+        if not _next_provider(f"Gemini kept failing ({str(e).splitlines()[0][:60]})"):
+            raise
+        return call_local_llm(prompt)

@@ -45,6 +45,13 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 # 3.8-flash answers roughly two times in three, 3.5-flash answered every time.
 # The default is the one that replies, not the one with the highest number.
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash")
+
+# Groq runs open-weight models on its own hardware, free, no card. It exists
+# here as a second opinion rather than a better one: when Google is refusing
+# requests, a different company's capacity is unaffected by that, which is a
+# thing no amount of retrying against Google can achieve.
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "gemini").strip().lower()
 LOCAL_WHISPER_MODEL = os.getenv("LOCAL_WHISPER_MODEL", "base")
 LOCAL_WHISPER_DEVICE = os.getenv("LOCAL_WHISPER_DEVICE", "auto")  # auto / cpu / cuda
@@ -93,6 +100,8 @@ def current_model(provider: str) -> str:
     from . import user_config
     if provider == "openai":
         return user_config.get("OPENAI_MODEL", OPENAI_MODEL)
+    if provider == "groq":
+        return user_config.get("GROQ_MODEL", GROQ_MODEL)
     return user_config.get("GEMINI_MODEL", GEMINI_MODEL)
 
 
@@ -126,6 +135,17 @@ def require_openai_key() -> str:
     raise RuntimeError(
         "OPENAI_API_KEY is not set. Local mode needs an OpenAI key for highlight "
         "ranking." + _where_we_looked("OPENAI_API_KEY")
+    )
+
+
+def require_groq_key() -> str:
+    from . import user_config
+    key = user_config.get("GROQ_API_KEY", GROQ_API_KEY)
+    if key:
+        return key
+    raise RuntimeError(
+        "GROQ_API_KEY is not set. Get a free one at https://console.groq.com "
+        "— no card required." + _where_we_looked("GROQ_API_KEY")
     )
 
 

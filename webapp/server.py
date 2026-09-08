@@ -197,11 +197,17 @@ async def set_settings(req: SettingsRequest) -> dict:
     from shorts_generator import user_config
 
     provider = (req.provider or "gemini").strip().lower()
-    if provider not in ("gemini", "openai"):
-        raise HTTPException(400, "Provider must be 'gemini' or 'openai'.")
+    # A mapping rather than a chain of two-way ternaries: with three providers
+    # the "gemini or else openai" shape silently files Groq's key under
+    # OpenAI's name, which is the kind of bug that only shows up as a
+    # confusing auth failure much later.
+    prefixes = {"gemini": "GEMINI", "openai": "OPENAI", "groq": "GROQ"}
+    if provider not in prefixes:
+        raise HTTPException(400, "Provider must be 'gemini', 'groq' or 'openai'.")
+    prefix = prefixes[provider]
 
     key = (req.api_key or "").strip()
-    key_name = "GEMINI_API_KEY" if provider == "gemini" else "OPENAI_API_KEY"
+    key_name = f"{prefix}_API_KEY"
     # Switching to a provider whose key is already stored must not demand the
     # key again — retyping a secret you already saved is not a security step,
     # it is just a reason to keep the wrong provider selected.
@@ -221,12 +227,12 @@ async def set_settings(req: SettingsRequest) -> dict:
             problem = await asyncio.to_thread(check_gemini_model, model)
             if problem:
                 raise HTTPException(400, problem)
-        values["GEMINI_MODEL" if provider == "gemini" else "OPENAI_MODEL"] = model
+        values[f"{prefix}_MODEL"] = model
     if req.daily_limit is not None:
         cap = req.daily_limit.strip()
         if cap and not cap.isdigit():
             raise HTTPException(400, "The daily cap must be a whole number of requests.")
-        values["GEMINI_DAILY_LIMIT" if provider == "gemini" else "OPENAI_DAILY_LIMIT"] = cap
+        values[f"{prefix}_DAILY_LIMIT"] = cap
 
     path = user_config.save(values)
     return {"saved": True, "config_path": str(path),
