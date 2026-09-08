@@ -460,16 +460,30 @@ async def reveal_clip(job_id: str, req: ShowRequest) -> dict:
     return {"opened": str(target), "folder": str(target.parent if req.file else target)}
 
 
-@app.post("/api/open-upload")
-async def open_upload() -> dict:
-    """Open YouTube's upload page in the user's real browser.
+# Every external page this app will open, chosen by name. The page sends a
+# key, never a URL: a browser-supplied address here would let anything
+# rendered in the webview open an arbitrary site in the user's real browser.
+EXTERNAL_LINKS = {
+    "upload": "https://www.youtube.com/upload",
+    "author-youtube": "https://www.youtube.com/@ParthBhadana799",
+    "author-github": "https://github.com/kleZ799",
+    "author-linkedin": "https://www.linkedin.com/in/parth-bhadana-530014202/",
+    "repo": "https://github.com/kleZ799/stream-to-shorts",
+}
 
-    The URL is hardcoded on purpose — this opens an external page, so it must
-    not be steerable by anything the page sends.
+
+@app.post("/api/open-upload")
+async def open_upload(what: str = "upload") -> dict:
+    """Open one of a known set of pages in the user's real browser.
+
+    The URL is looked up, never received. This opens a page outside the app's
+    own window, so it must not be steerable by anything the page sends.
     """
     import webbrowser
 
-    url = "https://www.youtube.com/upload"
+    url = EXTERNAL_LINKS.get(what)
+    if url is None:
+        raise HTTPException(400, "Unknown link.")
     ok = await asyncio.to_thread(webbrowser.open, url)
     return {"opened": ok, "url": url}
 

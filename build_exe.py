@@ -125,6 +125,15 @@ def main() -> int:
     else:
         print("leaving the CUDA runtime out — transcription will run on the CPU")
 
+    # Author and copyright, compiled into the exe's version resource. This is
+    # what Properties -> Details shows, so a copy that has travelled away from
+    # this repo still says who wrote it and under what licence.
+    version_file = ROOT / "version_info.txt"
+    if version_file.exists():
+        cmd[-1:-1] = ["--version-file", str(version_file)]
+    else:
+        print("no version_info.txt — the exe will ship with no author metadata")
+
     icon = ROOT / "assets" / "icon.ico"
     if icon.exists():
         cmd[-1:-1] = ["--icon", str(icon)]

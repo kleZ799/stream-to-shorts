@@ -542,6 +542,19 @@ async function openYouTubeUpload() {
 $("uploadBtn").onclick = openYouTubeUpload;
 $("gUpload").onclick = openYouTubeUpload;
 
+// The author's own links. Opened by name through the same allowlist as the
+// upload page -- the page never hands the server a URL to launch.
+async function openExternal(what) {
+  try {
+    await api(`/api/open-upload?what=${encodeURIComponent(what)}`, json("POST", {}));
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+$("creditYt").onclick = (e) => { e.preventDefault(); openExternal("author-youtube"); };
+$("creditGh").onclick = (e) => { e.preventDefault(); openExternal("author-github"); };
+$("creditLi").onclick = (e) => { e.preventDefault(); openExternal("author-linkedin"); };
+
 // ---------------------------------------------------------------- source
 
 function setSource(src, name) {

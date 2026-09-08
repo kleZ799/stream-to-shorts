@@ -1,5 +1,7 @@
 # How Stream → Shorts works
 
+By **Parth Bhadana** — [YouTube](https://www.youtube.com/@ParthBhadana799) · [GitHub](https://github.com/kleZ799) · [LinkedIn](https://www.linkedin.com/in/parth-bhadana-530014202/)
+
 > **📚 Study document.** This is a learning and reference companion to the
 > codebase — written to be read end-to-end so the whole system can be explained
 > from memory. It is *not* setup instructions (see the [README](README.md)) and
@@ -1749,3 +1751,16 @@ Reading in this order gets you productive fastest:
 The most valuable knob to turn first is `ACTIVE_VIRALITY_CRITERIA` in
 `highlights.py`. Everything else is tuning; that one changes what the app
 considers worth clipping at all.
+
+---
+
+## Author
+
+**Parth Bhadana**
+
+[YouTube](https://www.youtube.com/@ParthBhadana799) &middot; [GitHub](https://github.com/kleZ799) &middot; [LinkedIn](https://www.linkedin.com/in/parth-bhadana-530014202/)
+
+Built and maintained by me. If you use it, fork it, or ship anything based on
+it, the MIT licence asks one thing in return: keep the copyright notice.
+
+Repository: <https://github.com/kleZ799/stream-to-shorts>

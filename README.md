@@ -13,6 +13,11 @@ transcription and ranking both run locally.
 [![Download](https://img.shields.io/badge/⬇_Download_for_Windows-229_MB-ff0033?style=for-the-badge)](https://github.com/kleZ799/stream-to-shorts/releases/latest/download/StreamToShorts.exe)
 [![License](https://img.shields.io/badge/license-MIT-green?style=for-the-badge)](LICENSE)
 
+**Built by [Parth Bhadana](https://github.com/kleZ799)**
+&nbsp;·&nbsp; [YouTube](https://www.youtube.com/@ParthBhadana799)
+&nbsp;·&nbsp; [GitHub](https://github.com/kleZ799)
+&nbsp;·&nbsp; [LinkedIn](https://www.linkedin.com/in/parth-bhadana-530014202/)
+
 **No Python. No ffmpeg. Nothing to install.** Double-click and go.
 
 <img src="assets/screenshots/01-create.png" alt="The create screen: a layout prompt on the left, a live 9:16 preview on the right" width="880">
@@ -468,3 +473,16 @@ The published `StreamToShorts.exe` also carries ffmpeg and ffprobe (the
 [gyan.dev](https://www.gyan.dev/ffmpeg/builds/) essentials build), which are licensed under the
 GPL v3 — not MIT. That covers the bundled binaries only; this repository's own
 source stays MIT, and building from source pulls in no ffmpeg at all.
+
+---
+
+## Author
+
+**Parth Bhadana**
+
+[YouTube](https://www.youtube.com/@ParthBhadana799) &middot; [GitHub](https://github.com/kleZ799) &middot; [LinkedIn](https://www.linkedin.com/in/parth-bhadana-530014202/)
+
+Built and maintained by me. If you use it, fork it, or ship anything based on
+it, the MIT licence asks one thing in return: keep the copyright notice.
+
+Repository: <https://github.com/kleZ799/stream-to-shorts>

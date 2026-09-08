@@ -1576,3 +1576,37 @@ body.player-on .player-body { transform: none; }
   font-size: 13px;
 }
 .btn.sm { height: 30px; padding: 0 12px; font-size: 13px; }
+
+
+/* Author credit under the sidebar footer. Deliberately quiet -- it should be
+   findable, not competing with the controls above it. */
+.g-credit {
+  margin: 10px 12px 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--muted, #888);
+}
+.g-credit b { color: var(--text, #ddd); font-weight: 600; }
+.g-credit a { color: var(--muted, #888); text-decoration: none; }
+.g-credit a:hover { color: var(--accent, #ff0033); text-decoration: underline; }
+
+/* Author byline in the masthead. Sits in the gap left of Create, quiet enough
+   not to compete with the controls but permanent enough to be seen. */
+.byline {
+  display: flex; flex-direction: column; justify-content: center;
+  margin-right: 14px; line-height: 1.25; white-space: nowrap;
+}
+.by-name { font-size: 11.5px; font-weight: 600; color: var(--text-2, #aaa); }
+.by-links { display: flex; gap: 8px; font-size: 10.5px; }
+.by-links a { color: var(--text-3, #777); text-decoration: none; }
+.by-links a:hover { color: var(--red, #ff0033); text-decoration: underline; }
+
+/* The narrow window has no room for it; the sidebar credit still carries the
+   name there, so nothing is lost. */
+@media (max-width: 1100px) { .byline { display: none; } }
+
+.g-credit {
+  margin: 0 12px 14px; font-size: 11px; line-height: 1.5;
+  color: var(--text-3, #777);
+}
+.g-credit b { color: var(--text-2, #aaa); font-weight: 600; }
