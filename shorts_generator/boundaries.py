@@ -301,11 +301,22 @@ def refine(highlights: List[Dict], transcript: Optional[Dict],
     lo = max(4.0, lo - reserve_seconds)
     hi = max(lo + 1.0, hi - reserve_seconds)
 
+    # Nothing may run past the end of the video. Extending a clip to reach the
+    # length that was asked for is right up until it asks ffmpeg for footage
+    # that does not exist, which yields a short clip with no explanation.
+    try:
+        limit = float(transcript.get("duration", 0) or 0) if transcript else 0.0
+    except (TypeError, ValueError):
+        limit = 0.0
+
     for h in highlights:
         original = (float(h.get("start_time", 0) or 0), float(h.get("end_time", 0) or 0))
         start, idx, notes = _choose_start(segments, h, audio)
         end, more = _choose_end(segments, idx, start, original[1], lo, hi, audio)
         notes += more
+        if limit > 0 and end > limit:
+            end = limit
+            notes.append("ran to the end of the video")
 
         if end - start < 2.0:
             # Nothing usable came out of the snap; leave the model's own span
