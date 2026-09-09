@@ -13,7 +13,7 @@ transcription and ranking both run locally.
 [![Download](https://img.shields.io/badge/⬇_Download_for_Windows-229_MB-ff0033?style=for-the-badge)](https://github.com/kleZ799/stream-to-shorts/releases/latest/download/StreamToShorts.exe)
 [![License](https://img.shields.io/badge/license-MIT-green?style=for-the-badge)](LICENSE)
 
-[![Download for Mac](https://img.shields.io/badge/⬇_Download_for_Mac-BETA_·_Apple_Silicon-f59e0b?style=for-the-badge)](https://github.com/kleZ799/stream-to-shorts/releases/latest)
+[![Download for Mac](https://img.shields.io/badge/⬇_Download_for_Mac-BETA_·_Apple_Silicon-f59e0b?style=for-the-badge)](https://github.com/kleZ799/stream-to-shorts/releases/latest/download/StreamToShorts-macOS-arm64.zip)
 
 **The Mac build is a beta and has never been run on a Mac** — I don't own one.
 It is built and checked by GitHub's macOS runners, not by me. It may not start
@@ -154,7 +154,7 @@ rendered file.
 
 [**⬇ Download StreamToShorts.exe**](https://github.com/kleZ799/stream-to-shorts/releases/latest/download/StreamToShorts.exe) — 229 MB, Windows, self-contained.
 
-[**⬇ Download for Mac**](https://github.com/kleZ799/stream-to-shorts/releases/latest) — `StreamToShorts-macOS-arm64.zip`, Apple Silicon. **Beta.**
+[**⬇ Download StreamToShorts-macOS-arm64.zip**](https://github.com/kleZ799/stream-to-shorts/releases/latest/download/StreamToShorts-macOS-arm64.zip) — 165 MB, Apple Silicon. **Beta.**
 
 > ### ⚠️ Read this before you download the Mac build
 >
