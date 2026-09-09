@@ -7,5 +7,8 @@ openai>=1.0.0
 google-genai>=1.0.0
 # opencv 5.x removed cv2.CascadeClassifier, which local/clipper.py needs for face tracking.
 opencv-python>=4.8.0,<5
+# Reads the source's loudness envelope for hook detection. opencv already
+# pulls it in, but signals.py imports it directly, so it is named directly.
+numpy>=1.24
 # torch is only needed if you want CUDA Whisper. CPU works without it.
 # torch>=2.0

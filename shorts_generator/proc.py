@@ -207,3 +207,31 @@ def run(cmd, *, check: bool = False, capture_output: bool = False,
     if check and proc.returncode != 0:
         raise subprocess.CalledProcessError(proc.returncode, cmd, out, err)
     return result
+
+
+def popen(cmd, **kwargs) -> subprocess.Popen:
+    """Start a child and hand it back, still running.
+
+    run() above covers every call that just needs an exit code. Reading a
+    long stream out of ffmpeg while it is still writing needs the process
+    itself -- but it still has to be hidden, still has to be suspendable, and
+    still has to be dropped from the registry when it ends, so it goes through
+    here rather than reaching for subprocess directly.
+    """
+    wait_if_paused()
+    child = subprocess.Popen(cmd, **_hidden(dict(kwargs)))
+    with _lock:
+        _children.append(child)
+        if _paused.is_set():
+            try:
+                _suspend_pid(child.pid)
+            except Exception:
+                pass
+    return child
+
+
+def forget(child: subprocess.Popen) -> None:
+    """Drop a popen() child from the pause registry once it has finished."""
+    with _lock:
+        if child in _children:
+            _children.remove(child)
