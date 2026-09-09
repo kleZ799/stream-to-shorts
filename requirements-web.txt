@@ -7,3 +7,12 @@ python-multipart>=0.0.9
 
 # Native app window. Without it desktop.py falls back to your browser.
 pywebview>=5.0
+
+# pywebview reaches its macOS backend through PyObjC rather than a binding of
+# its own, and does not pull these in itself -- so without them the mac build
+# opens a browser tab instead of an app window, which is the one thing the
+# desktop build exists to avoid. Windows needs none of it: there the backend is
+# Edge WebView2, which ships with the OS.
+pyobjc-core>=10.0; sys_platform == "darwin"
+pyobjc-framework-Cocoa>=10.0; sys_platform == "darwin"
+pyobjc-framework-WebKit>=10.0; sys_platform == "darwin"
