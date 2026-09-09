@@ -1,11 +1,13 @@
-# Builds the Windows exe and publishes it as a release.
+# Builds the app for Windows and macOS and publishes both as one release.
 #
 #     git tag -a v1.6.0 -m "Stream to Shorts v1.6.0"
 #     git push origin v1.6.0
 #
-# That is the whole release. The exe is built here rather than on a laptop,
+# That is the whole release. The builds are made here rather than on a laptop,
 # which matters more than convenience now that the app updates itself: what
 # this workflow publishes is what every installed copy will download and run.
+# It is also the only way the mac build exists at all — PyInstaller cannot
+# cross-compile, and there is no Mac on this project's desk.
 #
 # Release notes come from docs/release-notes/<tag>.md when that file exists,
 # and from GitHub's generated commit summary when it does not.
@@ -28,7 +30,7 @@ concurrency:
   cancel-in-progress: false     # never kill a half-finished upload
 
 jobs:
-  build:
+  windows:
     runs-on: windows-latest
     timeout-minutes: 90
 
@@ -149,4 +151,138 @@ jobs:
             echo "- \`StreamToShorts.exe\` — SHA-256 \`$SHA256\`"
             echo "- Every installed copy from v1.5.0 onward will offer this build."
             echo "- <https://github.com/${{ github.repository }}/releases/tag/$tag>"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  macos:
+    # The Windows job is what creates the release; this one only adds to it.
+    # Both trying to create it is a race, and the loser fails on "already
+    # exists" after an hour of work.
+    needs: windows
+    runs-on: macos-latest       # Apple Silicon, and so is what it produces
+    timeout-minutes: 90
+
+    steps:
+      - name: Work out which tag we are building
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "name=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.tag.outputs.name }}
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-web.txt pyinstaller
+
+      # Static arm64 builds, because the obvious alternative is not one: a
+      # Homebrew ffmpeg links against dylibs in /opt/homebrew, so bundling it
+      # would ship an app that runs here and nowhere else. Pinned rather than
+      # "latest" so a release cannot silently change what it carries.
+      - name: Fetch ffmpeg
+        run: |
+          mkdir -p bin
+          fetch() {
+            name="$1"; url="$2"
+            echo "downloading $url"
+            curl -fsSL --retry 3 --retry-delay 5 -o "$name.zip" "$url"
+            rm -rf ffmpeg-tmp && mkdir ffmpeg-tmp
+            unzip -oq "$name.zip" -d ffmpeg-tmp
+            found=$(find ffmpeg-tmp -type f -name "$name" | head -1)
+            if [ -z "$found" ]; then
+              echo "::error::$name was not in $url"
+              exit 1
+            fi
+            mv "$found" "bin/$name"
+            chmod +x "bin/$name"
+            rm -rf "$name.zip" ffmpeg-tmp
+          }
+          fetch ffmpeg  https://www.osxexperts.net/ffmpeg711arm.zip
+          fetch ffprobe https://www.osxexperts.net/ffprobe711arm.zip
+
+          # An x86_64 binary in an arm64 app is not a build failure, it is a
+          # user needing Rosetta for a tool they were promised was included.
+          file bin/ffmpeg bin/ffprobe
+          if ! file bin/ffmpeg | grep -q arm64; then
+            echo "::error::bin/ffmpeg is not an arm64 binary"
+            exit 1
+          fi
+          ./bin/ffmpeg -version | head -1
+
+      # No --onefile: a mac release ships the .app bundle. build_exe.py stamps
+      # the version into Info.plist and signs the result ad-hoc, which is what
+      # makes it launchable on Apple Silicon at all.
+      - name: Build the app
+        run: python build_exe.py
+
+      - name: Check the built app is what it claims to be
+        run: |
+          app="dist/StreamToShorts.app"
+          if [ ! -d "$app" ]; then
+            echo "::error::the build produced no .app"
+            exit 1
+          fi
+
+          v=$(plutil -extract CFBundleShortVersionString raw "$app/Contents/Info.plist")
+          want="${{ steps.tag.outputs.name }}"
+          want="${want#v}"
+          echo "Info.plist version: $v"
+          if [ "$v" != "$want" ]; then
+            echo "::error::the app reports $v, expected $want"
+            exit 1
+          fi
+
+          # A broken signature is not visible until a user's Mac refuses to
+          # open the thing, by which point it is on the releases page.
+          codesign --verify --deep --strict --verbose=2 "$app"
+
+          # And prove ffmpeg both survived the bundling and can still run,
+          # since it is the piece that arrives as a resource and has to be
+          # chmod'd and signed back into being a program.
+          ff=$(find "$app" -type f -name ffmpeg | head -1)
+          if [ -z "$ff" ]; then
+            echo "::error::the bundle has no ffmpeg in it"
+            exit 1
+          fi
+          echo "bundled ffmpeg: ${ff#dist/}"
+          "$ff" -version | head -1
+
+      # ditto, not zip: a .app is full of symlinks and carries a signature
+      # that plain zip mangles, and a mangled signature is an app that will
+      # not open.
+      - name: Zip the bundle
+        run: |
+          ditto -c -k --sequesterRsrc --keepParent \
+            dist/StreamToShorts.app StreamToShorts-macOS-arm64.zip
+          ls -lh StreamToShorts-macOS-arm64.zip
+          shasum -a 256 StreamToShorts-macOS-arm64.zip
+          echo "SHA256=$(shasum -a 256 StreamToShorts-macOS-arm64.zip | cut -d' ' -f1)" >> "$GITHUB_ENV"
+
+      - name: Add it to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${{ steps.tag.outputs.name }}" \
+            StreamToShorts-macOS-arm64.zip --clobber
+
+      - name: Summary
+        run: |
+          {
+            echo "### macOS build"
+            echo ""
+            echo "- \`StreamToShorts-macOS-arm64.zip\` — SHA-256 \`$SHA256\`"
+            echo "- Apple Silicon only, and signed ad-hoc rather than notarised —"
+            echo "  first launch needs System Settings → Privacy & Security → Open Anyway."
+            echo "- The mac app checks for updates but does not install them."
           } >> "$GITHUB_STEP_SUMMARY"
