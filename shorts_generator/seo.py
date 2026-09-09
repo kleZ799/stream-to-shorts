@@ -53,6 +53,8 @@ SEO_PROMPT = """You are the packaging strategist for a YouTube Shorts channel th
 SOURCE VIDEO
 {video_context}
 
+{subject_block}
+
 You are given {n} clips cut from that video, already ranked best to worst by viral potential. For EACH clip, write upload-ready metadata.
 
 THE TWO RULES THAT OUTRANK EVERYTHING BELOW:
@@ -65,6 +67,7 @@ HOW SHORTS ARE ACTUALLY DISTRIBUTED - write for this, not for a search engine:
 - The FIRST THREE hashtags in the description are shown as clickable links above the title. That makes them the most visible metadata on the whole upload, so they must be the terms this clip should be filed under.
 - A hashtag in the TITLE buys nothing and spends characters you need for keywords. Put no hashtags in the title.
 - 3-5 hashtags total. A longer list reads as spam, and past 15 every hashtag on the video is ignored outright.
+- Use the controlled hashtags named in the SUBJECT block above, plus #shorts. Inventing a fresh hashtag per clip splits one video's clips across several dead tags instead of stacking them in one live one.
 - A few precise tags beat a wall of them. Padding the tag list dilutes it.
 
 REACHING PAST THE AUDIENCE THE CHANNEL ALREADY HAS - this decides how wide a clip travels:
@@ -114,6 +117,98 @@ CLIPS
 
 Respond with ONLY valid JSON, no markdown fences:
 {{"clips":[{{"index":int,"title":"string","description":"string","tags":["string"],"hashtags":["string"],"hook_text":"string","why_it_works":"string"}}]}}"""
+
+
+# Asked once per run, before any title is written. Everything downstream then
+# files every clip under the same name for the same thing — which is the whole
+# point of a controlled vocabulary. Ten clips that each invent their own way of
+# saying "Elden Ring" are ten clips competing in ten different narrow slices of
+# the feed instead of stacking into one.
+SUBJECT_PROMPT = """Identify what this video is actually ABOUT, as a viewer browsing YouTube would name it.
+
+SOURCE VIDEO
+{video_context}
+
+WHAT IS SAID IN IT (a sample)
+{sample}
+
+Answer with the one thing a stranger would search for: the game being played, the show being watched, the person being interviewed, or the topic being discussed. Prefer the proper name over a category — "Elden Ring", not "a souls game"; "Formula 1", not "motorsport".
+
+Rules:
+- "subject" is that proper name, exactly as it is normally written. If the video genuinely has no nameable subject, use an empty string rather than inventing one.
+- "kind" is one of: game, show, movie, person, sport, topic, none
+- "also_known_as" lists up to 3 other names real people use for it (abbreviations, nicknames). Empty list if there are none.
+- "hashtags" is 2-4 hashtags for this subject and its niche, lowercase, no spaces, no #shorts (that is added separately). These are the ONLY topic hashtags the clips from this video will use, so choose ones people actually follow.
+- "tags" is 3-6 lowercase search terms for the subject and its category.
+- Never guess. Everything here must be supported by the metadata or the transcript above.
+
+Respond with ONLY valid JSON:
+{{"subject":"string","kind":"string","also_known_as":["string"],"hashtags":["string"],"tags":["string"]}}"""
+
+
+def detect_subject(video_meta: Optional[Dict], transcript: Optional[Dict] = None,
+                   source: str = "", llm_fn: Optional[LLMFn] = None) -> Dict:
+    """What the video is about, named once for the whole run.
+
+    A title that does not name its subject is invisible outside the feed — it
+    contains no word anyone would ever search or browse for. The subject is
+    rarely in the transcript (nobody says "welcome to my Elden Ring stream"
+    every ten minutes), so it is worked out once from the video's own listing
+    plus a sample of what is said, and then handed to every clip.
+
+    Best-effort like everything else here: an empty subject just means the
+    titles are written from the clips alone, which is what happened before.
+    """
+    empty = {"subject": "", "kind": "none", "also_known_as": [], "hashtags": [], "tags": []}
+    if llm_fn is None:
+        return empty
+
+    segments = (transcript or {}).get("segments") or []
+    sample = " ".join(str(s.get("text", "")).strip() for s in segments[:40])[:1500]
+    prompt = SUBJECT_PROMPT.format(
+        video_context=describe_video(video_meta, source),
+        sample=sample or "(no transcript available)",
+    )
+    try:
+        parsed = _parse_json_loose(llm_fn(prompt))
+    except Exception as e:
+        print(f"[seo] could not identify the subject ({e}) — "
+              f"titles will be written from the clips alone", flush=True)
+        return empty
+
+    subject = re.sub(r"\s+", " ", str(parsed.get("subject") or "")).strip()[:80]
+    out = {
+        "subject": subject,
+        "kind": str(parsed.get("kind") or "none").strip().lower()[:20],
+        "also_known_as": [str(a).strip()[:40] for a in (parsed.get("also_known_as") or [])
+                          if str(a).strip()][:3],
+        "hashtags": _clean_hashtags(parsed.get("hashtags"))[1:],   # drop the forced #shorts
+        "tags": _clean_tags(parsed.get("tags"), []),
+    }
+    if subject:
+        print(f"[seo] subject: {subject} ({out['kind']})", flush=True)
+    return out
+
+
+def subject_block(subject: Dict) -> str:
+    """The subject, stated to the metadata writer as a requirement."""
+    name = (subject or {}).get("subject") or ""
+    if not name:
+        return ("SUBJECT\n(Could not be identified. Write every title from the clip's own "
+                "words, and never name a game, person or place that is not said in it.)")
+    aka = ", ".join(subject.get("also_known_as") or [])
+    tags = " ".join(subject.get("hashtags") or [])
+    return (
+        f"SUBJECT — this is what the whole video is about: {name} ({subject.get('kind')})"
+        + (f"\nAlso called: {aka}" if aka else "")
+        + (f"\nThe controlled hashtags for it: {tags}" if tags else "")
+        + f"\n\nEVERY title must place the clip in {name} — either by naming it outright, "
+        f"or by naming something from it so specific that nothing else could be meant "
+        f"(a character, a place, a mechanic said in the clip). A title that would fit any "
+        f"video on the platform is a title nobody can find.\n"
+        f"This does not license a claim the clip does not support: name {name}, and then "
+        f"say only what actually happens in the clip. Rule 1 still outranks this."
+    )
 
 
 def _clip_transcript(transcript: Optional[Dict], start: float, end: float,
@@ -259,7 +354,38 @@ def _strip_title_hashtags(title: str) -> str:
     return re.sub(r"\s+", " ", title).strip(" -|,")
 
 
-def _fallback_for(h: Dict, video_meta: Optional[Dict]) -> Dict:
+def _merge_hashtags(model_tags: List[str], subject: Optional[Dict]) -> List[str]:
+    """#shorts, then the run's controlled tags, then whatever the model added.
+
+    Order is the whole point: YouTube renders the first three as links above
+    the title, so the slots are spent on the terms this video should be filed
+    under rather than on whatever a model reached for that clip. The model's
+    own suggestions are kept, just behind them -- it sometimes catches
+    something clip-specific worth having.
+    """
+    controlled = list((subject or {}).get("hashtags") or [])
+    out, seen = [], set()
+    for tag in ["#shorts"] + controlled + list(model_tags):
+        key = tag.lower()
+        if key in seen or len(tag) < 3:
+            continue
+        seen.add(key)
+        out.append(tag)
+        if len(out) >= MAX_HASHTAGS:
+            break
+    return out
+
+
+def _subject_terms(subject: Optional[Dict]) -> List[str]:
+    """The subject's own name and aliases, as tags."""
+    subject = subject or {}
+    name = subject.get("subject") or ""
+    return [t for t in ([name] + list(subject.get("also_known_as") or [])
+                        + list(subject.get("tags") or [])) if t]
+
+
+def _fallback_for(h: Dict, video_meta: Optional[Dict],
+                  subject: Optional[Dict] = None) -> Dict:
     """Metadata derived from the highlight alone, when the LLM can't be reached.
 
     Weaker than the model's version, but every word of it comes from the clip's
@@ -270,7 +396,7 @@ def _fallback_for(h: Dict, video_meta: Optional[Dict]) -> Dict:
     title = re.sub(r"\s+", " ", title).rstrip(" .,-")
     if len(title) > TITLE_LIMIT - 8:
         title = title[:TITLE_LIMIT - 11].rstrip() + "..."
-    hashtags = ["#shorts", "#clips", "#viral"]
+    hashtags = _merge_hashtags(["#clips", "#viral"], subject)
 
     words = re.findall(r"[a-z]{4,}", f"{title} {h.get('virality_reason', '')}".lower())
     topic = list(dict.fromkeys(words))[:6]
@@ -290,7 +416,7 @@ def _fallback_for(h: Dict, video_meta: Optional[Dict]) -> Dict:
             "",
             " ".join(hashtags),
         ]),
-        "tags": _clean_tags(source_tags + topic
+        "tags": _clean_tags(_subject_terms(subject) + source_tags + topic
                             + ["shorts", "stream highlights", "gaming clips"], []),
         "hashtags": hashtags,
         "hook_text": (h.get("hook_sentence") or h.get("title") or "")[:HOOK_LIMIT],
@@ -299,22 +425,29 @@ def _fallback_for(h: Dict, video_meta: Optional[Dict]) -> Dict:
     }
 
 
-def _coerce_entry(item: Dict, h: Dict, video_meta: Optional[Dict]) -> Dict:
+def _coerce_entry(item: Dict, h: Dict, video_meta: Optional[Dict],
+                  subject: Optional[Dict] = None) -> Dict:
     """Force one model entry into shape, filling any gap from the fallback."""
-    base = _fallback_for(h, video_meta)
+    base = _fallback_for(h, video_meta, subject)
 
     title = _strip_title_hashtags(str(item.get("title") or ""))[:TITLE_LIMIT]
     if not title:
         title = base["title"]
 
     description = str(item.get("description") or "").strip()[:DESCRIPTION_LIMIT]
-    hashtags = _clean_hashtags(item.get("hashtags")) or base["hashtags"]
+    hashtags = _merge_hashtags(_clean_hashtags(item.get("hashtags")), subject)         or base["hashtags"]
     if not description:
         description = base["description"]
     elif not any(t.lower() in description.lower() for t in hashtags):
         description = f"{description}\n\n{' '.join(hashtags)}"[:DESCRIPTION_LIMIT]
 
-    tags = _clean_tags(item.get("tags"), base["tags"])
+    # The subject's own name leads the tag list whatever the model returned:
+    # it is the one term someone might actually search, and a clip filed
+    # without it is findable only by accident.
+    model_tags = item.get("tags")
+    if isinstance(model_tags, str):
+        model_tags = model_tags.split(",")
+    tags = _clean_tags(_subject_terms(subject) + list(model_tags or []), base["tags"])
     hook = re.sub(r"\s+", " ", str(item.get("hook_text") or "")).strip()[:HOOK_LIMIT]
 
     return {
@@ -328,6 +461,52 @@ def _coerce_entry(item: Dict, h: Dict, video_meta: Optional[Dict]) -> Dict:
     }
 
 
+def apply_edit(existing: Optional[Dict], edit: Dict) -> Dict:
+    """Merge a person's own wording into a clip's metadata.
+
+    Held to the same limits the model's output is held to — a title over 100
+    characters is rejected by YouTube whoever typed it — but not to the same
+    rules. The house style says no hashtags in a title and a controlled tag
+    vocabulary; those exist to stop a model padding, and a person who types a
+    hashtag into their own title meant it. So the shape is enforced and the
+    judgement is not.
+
+    Only the fields actually present in `edit` change. Everything else on the
+    clip, including why_it_works and whether a model wrote the original,
+    survives untouched.
+    """
+    out = dict(existing or {})
+    out.setdefault("generated", False)
+
+    if "title" in edit:
+        title = re.sub(r"\s+", " ", str(edit["title"] or "")).strip()
+        if not title:
+            raise ValueError("A title can't be empty.")
+        if len(title) > TITLE_LIMIT:
+            raise ValueError(f"Titles have to be {TITLE_LIMIT} characters or fewer "
+                             f"— that one is {len(title)}.")
+        out["title"] = title
+
+    if "description" in edit:
+        out["description"] = str(edit["description"] or "").strip()[:DESCRIPTION_LIMIT]
+
+    if "tags" in edit:
+        raw = edit["tags"]
+        out["tags"] = _clean_tags(raw if isinstance(raw, list) else str(raw or ""), [])
+
+    if "hashtags" in edit:
+        out["hashtags"] = _clean_hashtags(edit["hashtags"])
+
+    if "hook_text" in edit:
+        out["hook_text"] = re.sub(r"\s+", " ",
+                                  str(edit["hook_text"] or "")).strip()[:HOOK_LIMIT]
+
+    # So a later "Rewrite" is a deliberate choice rather than a surprise: the
+    # UI can warn that it is about to throw away words a person wrote.
+    out["edited"] = True
+    return out
+
+
 def generate_seo(
     highlights: List[Dict],
     transcript: Optional[Dict] = None,
@@ -335,6 +514,7 @@ def generate_seo(
     source: str = "",
     llm_fn: Optional[LLMFn] = None,
     errors: Optional[List[str]] = None,
+    subject: Optional[Dict] = None,
 ) -> List[Dict]:
     """Upload metadata for each highlight, in the order given (best first).
 
@@ -348,12 +528,19 @@ def generate_seo(
         return []
 
     if llm_fn is None:
-        return [_fallback_for(h, video_meta) for h in highlights]
+        return [_fallback_for(h, video_meta, subject) for h in highlights]
+
+    # Named once for the batch unless the caller already did it -- ten clips
+    # from one video are about one thing, and asking ten times would invite
+    # ten answers.
+    if subject is None:
+        subject = detect_subject(video_meta, transcript, source, llm_fn)
 
     prompt = SEO_PROMPT.format(
         n=len(highlights),
         title_limit=TITLE_LIMIT,
         video_context=describe_video(video_meta, source),
+        subject_block=subject_block(subject),
         clips_block=_build_clips_block(highlights, transcript),
     )
 
@@ -379,8 +566,8 @@ def generate_seo(
     out = []
     for i, h in enumerate(highlights, 1):
         item = by_index.get(i)
-        out.append(_coerce_entry(item, h, video_meta) if isinstance(item, dict)
-                   else _fallback_for(h, video_meta))
+        out.append(_coerce_entry(item, h, video_meta, subject) if isinstance(item, dict)
+                   else _fallback_for(h, video_meta, subject))
     return out
 
 
