@@ -98,6 +98,17 @@ which files are safe to delete, and which one to leave alone — because the big
 downloads are the thing worth clearing out, and the manifest is the thing worth
 keeping.
 
+### Light or dark, your choice
+
+The app was dark only. There is a switch in the top bar now, next to Settings:
+a sun on the dark theme, a moon on the light one, showing where it will take
+you rather than where you are.
+
+It is remembered per machine, so the laptop and the desktop can disagree. A
+machine that has never been told follows the system, and keeps following it —
+so a Mac or a PC that switches itself to light at sunset takes the app along,
+until you press the button once and make the choice yours.
+
 ### No windows flashing at you
 
 ffmpeg is a console program, and a windowed app starting one makes Windows open

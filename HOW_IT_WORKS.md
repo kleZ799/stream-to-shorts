@@ -1558,6 +1558,64 @@ are separate artifacts — one build run refreshes only one of them.
 
 ---
 
+## 15b. Two themes out of one set of rules
+
+`style.css` defines colour once, as tokens on `:root`, and
+`:root[data-theme="light"]` redefines the tokens rather than restating any
+rule. That is the whole mechanism, and the reason for it is maintenance: a
+colour added to a rule later works in both themes or in neither. It cannot
+work in only one by accident, which is the failure mode of a second stylesheet
+that has to be kept in step by hand.
+
+Getting there meant pulling out ~180 hardcoded colours first. Three patterns
+were worth naming:
+
+**Faint overlays became one token.** Twenty rules used
+`rgba(255, 255, 255, a)` for hairlines, hovers and glass. They are now
+`rgba(var(--fg-rgb), a)`, and the light theme sets `--fg-rgb: 0, 0, 0`. All
+twenty flip on one line, and the alphas — which are what the dark theme was
+actually tuned with — never move.
+
+**Some things must not flip.** The chrome drawn *on* a video — the duration
+pill, the rank badge, the flags — sits on black in both themes, because a
+video frame is black whatever the page around it is doing. Left as
+`var(--text)` it would have gone black-on-black in the light theme. Those have
+their own `--on-media*` tokens, spelled out in `:root` and deliberately not
+redefined below, so they cannot be flipped by accident.
+
+**Grey does not travel.** `#8b8b8b` for the quietest text looked right beside
+the other light tokens and measured 3.4:1 against white — under the 4.5 floor
+for body text. The same grey is easier to read on black than on white, so
+`--text-3` is darker in the light theme than the dark theme's is light.
+
+### No flash of the wrong theme
+
+The theme is applied by a snippet in `<head>`, not by `app.js`, which loads at
+the end of `<body>`. Six lines early beats every launch opening dark and
+turning white a moment later.
+
+The choice lives in `localStorage`, not `settings.json`, because it belongs to
+the screen you are looking at rather than to the person: someone running this
+on a laptop and a bright desktop wants two answers, and a synced setting would
+give them one. A machine that has never chosen follows
+`prefers-color-scheme` and keeps following it, until the button is pressed
+once and the stored choice starts winning.
+
+### Checking it, rather than looking at it
+
+Both themes were checked with a contrast audit run in the page: walk every
+text node, compute the effective background by climbing until something is
+opaque, and flag anything under the WCAG floor for its size. The light theme
+comes back clean on the create, clips, help and settings views. The dark theme
+reports fifteen it has always reported — `--text-3` at 3.6:1 and white on the
+brand red at 3.96:1 — which the theme work did not touch and which are worth
+their own change.
+
+One trap worth writing down: measure *after* the transition, not during it.
+Colours are transitioned, and `getComputedStyle` mid-transition returns the
+in-between value — which produced a first audit full of light-theme text on
+dark-theme backgrounds, all of it fiction.
+
 ## 16a. Subprocesses: windows, and stopping them
 
 Everything external this app runs — ffmpeg, ffprobe, and yt-dlp's own ffmpeg

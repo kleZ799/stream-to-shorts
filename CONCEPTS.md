@@ -668,6 +668,43 @@ interface. Keeping both — a readable name outside, the id in a manifest inside
 
 ---
 
+## 12a. CS: indirection, and the things it must not reach
+
+**The concept.** A theme is the textbook use of one level of indirection:
+name every colour, then swap what the names point at. The interesting part is
+not the swap, it is that indirection is only safe where the *meaning* is
+stable. Where the name means something different in the two worlds, the
+indirection is the bug.
+
+**Where it shows up here.** `webapp/static/style.css`.
+
+Most of it is the easy case. `--text` means "text on the page background", the
+page background moves, and so does the text. Twenty faint overlays collapsed
+to `rgba(var(--fg-rgb), a)` — one token holding *what sits on the background*,
+alphas untouched — which is indirection paying for itself: one line changed,
+twenty rules followed.
+
+**The exceptions are where the thinking is.** The duration pill on a video
+thumbnail was `var(--text)`. That was never right, it was only *accidentally*
+right: black text on a light page, white text on a dark page, and the pill
+happens to sit on a video, which is black in both. Flip the theme and it
+becomes black on black. The token named a relationship the element did not
+have.
+
+The general shape: **a variable is a claim about what something is for.**
+`var(--text)` claims "this is text on the page". The pill is text on a video.
+While there was one theme, both claims produced the same colour and the wrong
+one cost nothing — the second theme is what turns a sloppy name into a defect.
+This is the same reason the `--warn` yellow used as a badge on a video needed
+a different token from the `--warn` used as a word on the page: one colour,
+two jobs, and only one of them changes when the page does.
+
+**Also worth knowing: contrast is not symmetric.** The grey that reads
+comfortably on black is too faint on white — same colour, same ratio arithmetic,
+different result, because the surround differs. Themes are not inversions.
+
+---
+
 ## 12b. CS: software distribution and self-update
 
 **The concept.** Getting software onto a machine and keeping it current are
