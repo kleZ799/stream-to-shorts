@@ -11,6 +11,7 @@ No subscription, no per-clip credits, no watermark, and nothing is uploaded —
 transcription and ranking both run locally.
 
 [![Download](https://img.shields.io/badge/⬇_Download_for_Windows-229_MB-ff0033?style=for-the-badge)](https://github.com/kleZ799/stream-to-shorts/releases/latest/download/StreamToShorts.exe)
+[![Download for Mac](https://img.shields.io/badge/⬇_Download_for_Mac-Apple_Silicon-555?style=for-the-badge)](https://github.com/kleZ799/stream-to-shorts/releases/latest)
 [![License](https://img.shields.io/badge/license-MIT-green?style=for-the-badge)](LICENSE)
 
 <!-- These read GitHub live, so a new release renames them on its own and
@@ -117,6 +118,12 @@ There is a **Check for updates** button in the top bar and in the sidebar, and
 the version you are running is shown in all three places, for when something
 has gone wrong and you need to say which build you are on.
 
+The mac app checks on the same schedule but stops at telling you: it is a
+bundle of hundreds of files signed as one unit, and replacing that under a
+running process leaves a signature that no longer matches its contents — the
+app macOS then refuses to open being the one the update was meant to deliver.
+So it says a version is out, and you download it.
+
 > Builds before v1.5.0 were compiled before any of this existed and cannot be
 > told about new versions. Those need one manual download — the last one.
 
@@ -146,6 +153,38 @@ Double-click it. On first run it asks for a [free Gemini API key](https://aistud
 **This is the only time you download by hand.** From v1.5.0 the app updates
 itself: it notices new releases, checks them, and replaces itself in place.
 
+**On a Mac**, take `StreamToShorts-macOS-arm64.zip` from the
+[latest release](https://github.com/kleZ799/stream-to-shorts/releases/latest),
+unzip it, and drag the app to Applications. Apple Silicon only — an M1 or
+later. It is the same app doing the same work, with two differences worth
+knowing before you start: macOS will not open it on the first try (below), and
+it tells you about new versions rather than installing them, so an update means
+downloading it again.
+
+<details>
+<summary>macOS says the app "cannot be opened" — what to do</summary>
+
+The mac build is signed, but not by Apple — notarising costs $99 a year and
+this is free software. So Gatekeeper stops the first launch and says the app
+is damaged or cannot be checked for malware. Nothing is damaged; macOS is
+telling you it has never seen this developer.
+
+Once, on first launch:
+
+1. Double-click the app. Let it be refused.
+2. Open **System Settings → Privacy & Security**, scroll down, and click
+   **Open Anyway** next to the message about StreamToShorts.
+3. Confirm. It opens normally from then on.
+
+Right-click → Open, which used to be the shortcut for this, no longer works on
+macOS 15 and later.
+
+The same things you can check on Windows apply here: every line is public, the
+app is built from this repository by GitHub's own runners, and each release
+publishes a SHA-256 for the file.
+
+</details>
+
 <details>
 <summary>Windows says it isn't safe — is it?</summary>
 
@@ -172,10 +211,10 @@ To run it: **More info → Run anyway**.
 <details>
 <summary>First-run details</summary>
 
-- **Windows will warn you.** The exe isn't code-signed, so SmartScreen shows *"Windows protected your PC"*. Click **More info → Run anyway**.
-- **First launch is slow.** It's a single file that unpacks itself each time.
-- **Where things go.** The key lives at `%APPDATA%\StreamToShorts\settings.json`; clips go to `%USERPROFILE%\Videos\StreamToShorts`, changeable in Settings.
-- **ffmpeg is bundled**, so there is nothing else to install.
+- **Windows will warn you.** The exe isn't code-signed, so SmartScreen shows *"Windows protected your PC"*. Click **More info → Run anyway**. On a Mac it is Gatekeeper instead — see above.
+- **First launch is slow.** It's a single file that unpacks itself each time. The mac app is a normal bundle and starts faster.
+- **Where things go.** The key lives at `%APPDATA%\StreamToShorts\settings.json`; clips go to `%USERPROFILE%\Videos\StreamToShorts`, changeable in Settings. On a Mac: `~/Library/Application Support/StreamToShorts/settings.json` and `~/Movies/StreamToShorts`.
+- **ffmpeg is bundled**, so there is nothing else to install — on both platforms.
 - **The downloadable .exe transcribes on the CPU.** The CUDA runtime is 2GB, and a single-file exe re-unpacks its whole payload on every launch — so bundling it would cost every user a slow start for something only NVIDIA owners can use. If you have an NVIDIA card and want the ~5x faster transcription, build the one-folder version from source: `pip install nvidia-cublas-cu12 nvidia-cudnn-cu12` then `python build_exe.py` (CUDA is the default there; `--no-cuda` opts out).
 
 </details>
@@ -407,6 +446,15 @@ Put `ffmpeg.exe` and `ffprobe.exe` in a `./bin` folder first and they get bundle
 which is how the published build needs nothing installed. That's what makes it
 229 MB; without them it's 153 MB and ffmpeg has to be on the user's PATH. Drop
 `--onefile` for a folder build that starts faster but has to be zipped to share.
+
+On a Mac the same command without `--onefile` produces `dist/StreamToShorts.app`:
+the icon is rendered from `assets/icon.png`, the version is written into
+Info.plist, and the bundle is signed ad-hoc so Apple Silicon will run it at all.
+Put static `ffmpeg` and `ffprobe` binaries in `./bin` — a Homebrew ffmpeg links
+against dylibs in `/opt/homebrew` and would only work on your own machine.
+PyInstaller cannot cross-compile, so the published mac build is made on a macOS
+runner by [the release workflow](.github/workflows/release.yml), which is also
+where those two download URLs live.
 
 **Drop a file or paste a link.** Drag a VOD straight in, or paste a YouTube URL. Paste a *channel* link and it lists the 12 most recent videos as a grid to pick from.
 

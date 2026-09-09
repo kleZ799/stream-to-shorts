@@ -1249,10 +1249,15 @@ before when the settings UI is added. Existing setups don't break.
 
 **Why `.env` is searched in three places** (`config.py::_env_file_candidates`):
 a bare `load_dotenv()` searches the *current directory*, and the packaged build
-`chdir`s to the user's Videos folder before any of this is imported. Someone who
+`chdir`s to the user's video folder before any of this is imported. Someone who
 put their key in the repo's `.env` and then ran the `.exe` got told the key "is
 not set" — true only of the directory the app happened to be standing in. So it
 also looks beside the executable and in the config directory.
+
+That last one asks `user_config.config_dir()` rather than reading `%APPDATA%`
+itself. It used to read the variable, which exists only on Windows, so the
+third place quietly became two on a Mac — a second copy of "where does config
+live" that knew about one platform.
 
 **Why `user_config.load()` records *why* it failed.** This file holds the user's
 API key. Reading it as `{}` because of a bad byte or a locked handle turns a
@@ -1284,7 +1289,7 @@ next request without a restart.
 | Settings + usage ledger | `%APPDATA%\StreamToShorts\` (`~/.config` Linux, `~/Library/Application Support` macOS) |
 | Source videos, `.srt`, `.highlights.json` | `<OUTPUT_ROOT>/output/` |
 | Rendered clips + `job.json` | `<OUTPUT_ROOT>/shorts/<job-id>/` |
-| `OUTPUT_ROOT` default | cwd — which is `~/Videos/StreamToShorts` in the packaged build |
+| `OUTPUT_ROOT` default | cwd — which is `~/Videos/StreamToShorts` in the packaged build, `~/Movies/StreamToShorts` on a Mac |
 
 `set_output_root()` **proves it can write** to a new location — creates the
 folder, writes a probe file, deletes it — before saving the setting. A save
@@ -1453,7 +1458,7 @@ this workflow, scripted.
 
 ---
 
-## 16. Packaging into a Windows .exe
+## 16. Packaging into a Windows .exe (and a mac .app)
 
 `build_exe.py` wraps PyInstaller. `--onedir` (default) starts faster;
 `--onefile` is a single self-contained exe that unpacks itself each launch.
@@ -1465,6 +1470,38 @@ everything PyInstaller's static analysis can't see:
 `google.genai`, `yt_dlp`, and the uvicorn loop/protocol/lifespan modules.
 `torch`, `matplotlib`, `tkinter` and `pytest` are excluded to keep size down
 (229 MB with ffmpeg, 153 MB without).
+
+### What changes on a Mac
+
+PyInstaller cannot cross-compile, so the mac build is made on a `macos-latest`
+runner by the release workflow. `build_exe.py` takes a different branch there,
+for four reasons that are all macOS insisting on something Windows never asked
+about:
+
+| | Windows | macOS |
+|---|---|---|
+| Shape | `.exe`, or a folder | `.app` bundle; `--onefile` is refused |
+| Webview backend | Edge WebView2, via `winforms` + `clr` | Cocoa WebKit, via `pyobjc` |
+| Icon | `assets/icon.ico` | `.icns`, rendered from `icon.png` by `sips` + `iconutil` |
+| Version metadata | `version_info.txt`, compiled in | `CFBundleShortVersionString`, written into `Info.plist` after the build |
+
+Two more things happen after PyInstaller finishes. `Info.plist` gets
+`NSAllowsLocalNetworking`, because the window loads `http://127.0.0.1` and App
+Transport Security otherwise blocks it — with no error, just a blank window
+over a server working perfectly. And the bundle is signed ad-hoc, along with
+the bundled ffmpeg individually: `codesign --deep` signs nested *code*, and
+ffmpeg went in as a resource, so it is skipped. On Apple Silicon an unsigned
+Mach-O is not distrusted, it is killed on exec — the app would have launched
+and then failed on the first clip.
+
+Ad-hoc means signed by nobody. Gatekeeper still refuses the first launch, and
+on macOS 15 the old right-click → Open shortcut is gone, so the user has to go
+to System Settings → Privacy & Security → Open Anyway. Notarising is what
+removes that, and it costs $99 a year.
+
+The published zip is made with `ditto`, not `zip`: a `.app` is full of symlinks
+and carries a signature that plain `zip` mangles, and a mangled signature is an
+app that will not open.
 
 `desktop.py` solves four problems specific to being a windowed app.
 
@@ -1480,8 +1517,10 @@ already have real streams, which is exactly why this never showed up in
 testing** — so packaged-app bugs must be reproduced *unredirected*.
 
 **2. Nowhere to write.** A packaged app must not write clips next to the `.exe`
-(often Program Files, often read-only), so a frozen build `chdir`s to
-`~/Videos/StreamToShorts` and creates its subfolders up front.
+(often Program Files, often read-only; on a Mac, *inside* the `.app`, where the
+next download would take them with it), so a frozen build `chdir`s to
+`~/Videos/StreamToShorts` — `~/Movies/StreamToShorts` on macOS, which has no
+Videos folder — and creates its subfolders up front.
 
 **3. Double-clicking.** A slow start looks exactly like a dead one, so the
 natural reaction is to click the icon again — and four copies each unpacking
@@ -1657,6 +1696,14 @@ problem, so it reports the new version and links to the releases page instead.
 The two are told apart by where `sys._MEIPASS` points: a one-file build unpacks
 to a temp directory far from the exe, a one-folder build unpacks nowhere and
 `_MEIPASS` is the `_internal` folder beside it.
+
+The mac build is in the same position for a sharper reason: a `.app` is signed
+as a single unit, so replacing its contents piecemeal leaves a signature that
+no longer matches them, and the app macOS then refuses to open is the one the
+update was supposed to deliver. It also looks for a different release asset —
+`StreamToShorts-macOS-arm64.zip` rather than `StreamToShorts.exe` — since
+looking for the exe would report every release as having nothing in it, and the
+app would go quiet about updates rather than obviously break.
 
 And nothing can update a build that shipped before this code existed. Every
 release up to v1.4.0 has no updater in it and never will — those installs need

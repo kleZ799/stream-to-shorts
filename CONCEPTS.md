@@ -51,8 +51,9 @@ engineering is.
 > transcript for clippable moments, then cut and re-frame those spans with
 > ffmpeg into 9:16 with the webcam stacked over the gameplay.
 >
-> Everything runs locally except one LLM call. It ships as a Windows desktop
-> app — a FastAPI server in a native webview window, packaged with PyInstaller.
+> Everything runs locally except one LLM call. It ships as a desktop app for
+> Windows and macOS — a FastAPI server in a native webview window, packaged
+> with PyInstaller.
 >
 > The interesting parts aren't the models, they're everything around them:
 > a 3h47m VOD does not fit in a context window, so ranking is chunked and
@@ -701,6 +702,15 @@ running file aside, move the verified download into its name, relaunch. The
 ordering gives you the property you want — every failure leaves a working app,
 because nothing is disturbed until the hash matches, and a failed second move
 puts the original back.
+
+**Where the same design does not port.** A macOS `.app` is a directory signed
+as one unit, so "replace the file" has no single file to replace, and a
+half-swapped bundle is worse than no update: its signature no longer matches
+its contents, and the app the OS then refuses to open is the one the update was
+delivering. The general lesson is that self-update is a property of the
+*packaging format*, not of the program — so the mac build keeps the half that
+carries most of the value and cannot go wrong (noticing that a version exists)
+and drops the half that can (installing it).
 
 **Resource cleanup is where this gets subtle.** The replaced build cannot be
 deleted by the process that replaced it: the old process is still exiting and
