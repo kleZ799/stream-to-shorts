@@ -8,7 +8,7 @@ If a native webview isn't available it falls back to the default browser
 rather than failing, because a working browser window beats no app at all.
 
 Run from source:   python desktop.py
-Packaged:          StreamToShorts.exe
+Packaged:          StreamToShorts.exe, or StreamToShorts.app on a Mac
 """
 import os
 import socket
@@ -27,20 +27,46 @@ def _resource_root() -> str:
     return getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
 
 
+def _bundled_bin() -> Optional[str]:
+    """Where this build put ffmpeg, if it shipped one.
+
+    On Windows the bundle is one flat directory, so this is just bin/ beside
+    everything else. A mac .app splits itself in two — code in
+    Contents/Frameworks, data files in Contents/Resources — and _MEIPASS
+    points at the code half. PyInstaller does symlink between them, but
+    "usually there is a symlink" is a thin thing to rest the whole
+    ffmpeg-is-included promise on, so the other half is checked as well.
+    """
+    root = _resource_root()
+    for path in (os.path.join(root, "bin"),
+                 os.path.join(os.path.dirname(root), "Resources", "bin")):
+        if os.path.isdir(path):
+            return path
+    return None
+
+
+def _media_dir_name() -> str:
+    """The folder this platform actually keeps video in.
+
+    macOS has no Videos folder. Inventing one would put every clip somewhere
+    Finder never suggests and the user never thinks to look.
+    """
+    return "Movies" if sys.platform == "darwin" else "Videos"
+
+
 def _prepare_environment() -> None:
     """Make the app behave the same whether run from source or a bundle."""
-    root = _resource_root()
-
     # Bundled ffmpeg/ffprobe, if the build shipped them, take priority.
-    bundled_bin = os.path.join(root, "bin")
-    if os.path.isdir(bundled_bin):
+    bundled_bin = _bundled_bin()
+    if bundled_bin:
         os.environ["PATH"] = bundled_bin + os.pathsep + os.environ.get("PATH", "")
 
-    # A packaged app must not write clips next to the .exe (often Program
-    # Files, often read-only). Work in the user's Videos folder instead.
+    # A packaged app must not write clips inside itself (often Program Files,
+    # often read-only; on a Mac, inside the .app bundle, where the next update
+    # would take them with it). Work in the user's video folder instead.
     if getattr(sys, "frozen", False):
         home = os.path.expanduser("~")
-        base = os.path.join(home, "Videos", "StreamToShorts")
+        base = os.path.join(home, _media_dir_name(), "StreamToShorts")
         for sub in ("", "output", "webapp_output", "webapp_uploads"):
             os.makedirs(os.path.join(base, sub), exist_ok=True)
         os.chdir(base)
@@ -96,6 +122,26 @@ def _alert(message: str, *, error: bool = True) -> None:
     look. Anything worth printing on the way out is worth a dialog box.
     """
     print(message, file=sys.stderr if error else sys.stdout, flush=True)
+
+    if sys.platform == "darwin":
+        try:
+            import subprocess
+
+            # AppleScript's only string escapes are these three, and osascript
+            # will not take a literal newline inside a quoted string.
+            body = (message.replace("\\", "\\\\").replace('"', '\\"')
+                           .replace("\n", "\\n"))
+            subprocess.run(
+                ["osascript", "-e",
+                 f'display dialog "{body}" with title "{APP_NAME}" '
+                 f'buttons {{"OK"}} default button "OK" '
+                 f'with icon {"stop" if error else "note"}'],
+                timeout=300,
+            )
+        except Exception:
+            pass    # a missing dialog must not become the reason we can't exit
+        return
+
     if sys.platform != "win32":
         return
     try:
