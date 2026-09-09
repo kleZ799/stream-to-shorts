@@ -11,6 +11,17 @@
 #
 # Release notes come from docs/release-notes/<tag>.md when that file exists,
 # and from GitHub's generated commit summary when it does not.
+#
+# Dry run
+# -------
+# Run this workflow by hand with "dry run" ticked and it builds both apps,
+# checks them, and publishes nothing — the builds are attached to the run
+# instead. No tag needed; it uses whichever branch you picked.
+#
+# That exists because the mac build cannot be tested on this project's desk.
+# A dry run proves the parts a runner can prove: that it builds at all, that
+# the version and signature are right, that the bundled ffmpeg runs. It cannot
+# prove the app opens on a real Mac. Worth being clear which half you got.
 name: Release
 
 on:
@@ -19,8 +30,13 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Existing tag to build and release (e.g. v1.6.0)"
-        required: true
+        description: "Existing tag to build and release (e.g. v1.6.0). Leave empty for a dry run of the current branch."
+        required: false
+        default: ""
+      dry_run:
+        description: "Dry run — build and check everything, publish nothing"
+        type: boolean
+        default: false
 
 permissions:
   contents: write        # needed to create the release
@@ -35,19 +51,41 @@ jobs:
     timeout-minutes: 90
 
     steps:
-      - name: Work out which tag we are building
+      - name: Work out what we are building, and whether to publish it
         id: tag
         shell: bash
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "name=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "name=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          tag="${{ inputs.tag }}"
+          dry="${{ inputs.dry_run }}"
+
+          # A tag push is always a real release. Nothing else can make it one.
+          if [ "${{ github.event_name }}" = "push" ]; then
+            tag="${GITHUB_REF#refs/tags/}"
+            dry="false"
           fi
+
+          # Publishing without a tag has nothing to attach the release to, and
+          # is more likely a forgotten field than an intention.
+          if [ "$dry" != "true" ] && [ -z "$tag" ]; then
+            echo "::error::Publishing needs a tag. Give one, or tick 'dry run' to build without publishing."
+            exit 1
+          fi
+
+          if [ "$dry" = "true" ]; then publish="false"; else publish="true"; fi
+          ref="${tag:-${{ github.ref_name }}}"
+
+          echo "tag:     ${tag:-(none)}"
+          echo "ref:     $ref"
+          echo "publish: $publish"
+          {
+            echo "name=$tag"
+            echo "ref=$ref"
+            echo "publish=$publish"
+          } >> "$GITHUB_OUTPUT"
 
       - uses: actions/checkout@v4
         with:
-          ref: ${{ steps.tag.outputs.name }}
+          ref: ${{ steps.tag.outputs.ref }}
           fetch-depth: 0
 
       # The updater compares the tag on the newest release against the version
@@ -56,6 +94,7 @@ jobs:
       # offers it again. Catching that here costs a second; catching it after
       # release means pulling a build back from people who already took it.
       - name: Refuse to build if the tag and the code disagree
+        if: steps.tag.outputs.publish == 'true'
         shell: bash
         run: |
           tag="${{ steps.tag.outputs.name }}"
@@ -110,7 +149,15 @@ jobs:
           $exe = "dist/StreamToShorts.exe"
           if (-not (Test-Path $exe)) { throw "the build produced no exe" }
           $v = (Get-Item $exe).VersionInfo.FileVersion
+          # A dry run has no tag to check against, so the exe is held to what
+          # the source says instead. Still worth checking: it is the number the
+          # updater will compare against, whatever built it.
           $want = "${{ steps.tag.outputs.name }}".TrimStart("v")
+          if (-not $want) {
+            $src = Get-Content shorts_generator/version.py -Raw
+            $want = [regex]::Match($src, 'APP_VERSION\s*=\s*"([^"]+)"').Groups[1].Value
+            Write-Host "dry run — checking against APP_VERSION ($want), not a tag"
+          }
           $size = [math]::Round((Get-Item $exe).Length / 1MB)
           $sha = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLower()
           Write-Host "version: $v   size: $size MB"
@@ -118,7 +165,20 @@ jobs:
           if ($v -ne $want) { throw "exe reports $v, expected $want" }
           "SHA256=$sha" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
+      # A dry run's whole point is to produce something to look at without
+      # putting it in front of users. Seven days is long enough to inspect and
+      # short enough that a habit of dry runs does not fill the account with
+      # quarter-gigabyte builds nobody asked to keep.
+      - name: Attach the build to this run instead
+        if: steps.tag.outputs.publish != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: StreamToShorts-windows
+          path: dist/StreamToShorts.exe
+          retention-days: 7
+
       - name: Publish the release
+        if: steps.tag.outputs.publish == 'true'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -146,34 +206,66 @@ jobs:
         run: |
           tag="${{ steps.tag.outputs.name }}"
           {
-            echo "### Released $tag"
-            echo ""
-            echo "- \`StreamToShorts.exe\` — SHA-256 \`$SHA256\`"
-            echo "- Every installed copy from v1.5.0 onward will offer this build."
-            echo "- <https://github.com/${{ github.repository }}/releases/tag/$tag>"
+            if [ "${{ steps.tag.outputs.publish }}" = "true" ]; then
+              echo "### Released $tag"
+              echo ""
+              echo "- \`StreamToShorts.exe\` — SHA-256 \`$SHA256\`"
+              echo "- Every installed copy from v1.5.0 onward will offer this build."
+              echo "- <https://github.com/${{ github.repository }}/releases/tag/$tag>"
+            else
+              echo "### Dry run — Windows build (nothing published)"
+              echo ""
+              echo "- \`StreamToShorts.exe\` — SHA-256 \`$SHA256\`"
+              echo "- Attached to this run for 7 days. No release was created or touched."
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
 
   macos:
     # The Windows job is what creates the release; this one only adds to it.
     # Both trying to create it is a race, and the loser fails on "already
     # exists" after an hour of work.
+    #
+    # A dry run publishes nothing, so there is no race to avoid and no reason
+    # for a Windows failure to hide a mac one. Finding out about both in a
+    # single run beats finding out about them in two.
+    #
+    # `== true`, not `== 'true'`: a boolean input is a real boolean here, and
+    # GitHub compares mixed types by casting to a number, where 'true' is NaN
+    # and never equal to anything. Inside a `run:` block the same input
+    # interpolates as text and *is* compared to "true" — the two look
+    # inconsistent and are both correct.
     needs: windows
+    if: ${{ !cancelled() && (needs.windows.result == 'success' || inputs.dry_run == true) }}
     runs-on: macos-latest       # Apple Silicon, and so is what it produces
     timeout-minutes: 90
 
     steps:
-      - name: Work out which tag we are building
+      - name: Work out what we are building, and whether to publish it
         id: tag
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "name=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "name=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          tag="${{ inputs.tag }}"
+          dry="${{ inputs.dry_run }}"
+
+          if [ "${{ github.event_name }}" = "push" ]; then
+            tag="${GITHUB_REF#refs/tags/}"
+            dry="false"
           fi
+
+          if [ "$dry" = "true" ]; then publish="false"; else publish="true"; fi
+          ref="${tag:-${{ github.ref_name }}}"
+
+          echo "tag:     ${tag:-(none)}"
+          echo "ref:     $ref"
+          echo "publish: $publish"
+          {
+            echo "name=$tag"
+            echo "ref=$ref"
+            echo "publish=$publish"
+          } >> "$GITHUB_OUTPUT"
 
       - uses: actions/checkout@v4
         with:
-          ref: ${{ steps.tag.outputs.name }}
+          ref: ${{ steps.tag.outputs.ref }}
           fetch-depth: 0
 
       - uses: actions/setup-python@v5
@@ -237,6 +329,12 @@ jobs:
           v=$(plutil -extract CFBundleShortVersionString raw "$app/Contents/Info.plist")
           want="${{ steps.tag.outputs.name }}"
           want="${want#v}"
+          # A dry run has no tag, so the bundle is held to what the source
+          # says instead of skipping the check entirely.
+          if [ -z "$want" ]; then
+            want=$(python -c "import re,io; s=io.open('shorts_generator/version.py',encoding='utf-8').read(); print(re.search(r'APP_VERSION\s*=\s*\"([^\"]+)\"', s).group(1))")
+            echo "dry run — checking against APP_VERSION ($want), not a tag"
+          fi
           echo "Info.plist version: $v"
           if [ "$v" != "$want" ]; then
             echo "::error::the app reports $v, expected $want"
@@ -269,7 +367,16 @@ jobs:
           shasum -a 256 StreamToShorts-macOS-arm64.zip
           echo "SHA256=$(shasum -a 256 StreamToShorts-macOS-arm64.zip | cut -d' ' -f1)" >> "$GITHUB_ENV"
 
+      - name: Attach the build to this run instead
+        if: steps.tag.outputs.publish != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: StreamToShorts-macos-arm64
+          path: StreamToShorts-macOS-arm64.zip
+          retention-days: 7
+
       - name: Add it to the release
+        if: steps.tag.outputs.publish == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -279,12 +386,22 @@ jobs:
       - name: Summary
         run: |
           {
-            echo "### macOS build (beta)"
+            if [ "${{ steps.tag.outputs.publish }}" = "true" ]; then
+              echo "### macOS build (beta)"
+            else
+              echo "### Dry run — macOS build (nothing published)"
+            fi
             echo ""
             echo "- \`StreamToShorts-macOS-arm64.zip\` — SHA-256 \`$SHA256\`"
-            echo "- **Never run on a Mac.** Everything above is what a runner could"
-            echo "  check; nobody has opened it. Say so in the release notes."
+            echo "- **Never run on a Mac.** What passed here is what a runner can"
+            echo "  check — it builds, the version matches, the signature verifies,"
+            echo "  the bundled ffmpeg runs. Nobody has opened the app."
             echo "- Apple Silicon only, and signed ad-hoc rather than notarised —"
             echo "  first launch needs System Settings → Privacy & Security → Open Anyway."
             echo "- The mac app checks for updates but does not install them."
+            if [ "${{ steps.tag.outputs.publish }}" = "true" ]; then
+              echo "- Say in the release notes that this build is a beta."
+            else
+              echo "- Attached to this run for 7 days. No release was created or touched."
+            fi
           } >> "$GITHUB_STEP_SUMMARY"

@@ -27,3 +27,15 @@ It also builds `StreamToShorts-macOS-arm64.zip` on a macOS runner. **Say in the
 notes that the mac build is a beta and has not been run on a Mac** — it is
 built and checked by CI, and that is all. Someone downloading it should know
 that before they do, not after.
+
+## Trying a build without releasing it
+
+Run the **Release** workflow by hand from the Actions tab, tick **dry run**,
+and leave the tag empty. It builds both apps from the branch you picked,
+checks them, publishes nothing, and attaches the results to the run for a
+week.
+
+Worth doing before a tag when anything about packaging changed — especially
+for the mac build, which cannot be tried here first. What it proves: that it
+builds, that the version and signature are right, that ffmpeg survived
+bundling. What it cannot prove: that the app opens on a real Mac.
