@@ -125,9 +125,27 @@ jobs:
       - name: Fetch ffmpeg
         shell: pwsh
         run: |
+          # Retried, because this is one small web host standing between a
+          # pushed tag and a release. A 503 from it killed the v1.9.0 build
+          # outright -- nothing to do with the code, and the only recourse was
+          # noticing and re-running by hand. The mac job has always used
+          # `curl --retry 3`; this is the same idea, backing off further each
+          # time so a host that is briefly overloaded gets a real chance.
           $url = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
-          Write-Host "downloading $url"
-          Invoke-WebRequest -Uri $url -OutFile ffmpeg.zip -UseBasicParsing
+          $ok = $false
+          foreach ($attempt in 1..5) {
+            try {
+              Write-Host "downloading $url (attempt $attempt of 5)"
+              Invoke-WebRequest -Uri $url -OutFile ffmpeg.zip -UseBasicParsing
+              $ok = $true
+              break
+            } catch {
+              $why = $_.Exception.Message -split "`n" | Select-Object -First 1
+              Write-Host "  failed: $why"
+              if ($attempt -lt 5) { Start-Sleep -Seconds (15 * $attempt) }
+            }
+          }
+          if (-not $ok) { throw "could not download ffmpeg after 5 attempts" }
           Expand-Archive ffmpeg.zip -DestinationPath ffmpeg-tmp
           New-Item -ItemType Directory -Force -Path bin | Out-Null
           Get-ChildItem ffmpeg-tmp -Recurse -Include ffmpeg.exe, ffprobe.exe |
