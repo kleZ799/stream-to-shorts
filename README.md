@@ -157,6 +157,16 @@ written from what is actually said in it. All four are editable, and **Save
 changes** keeps your wording — the mp4 on your PC is renamed to match the new
 title, so what is in the folder is always what goes into YouTube's title box.
 
+### When a render fails, it says what failed
+
+Open **Show the log** and a failed clip tells you what went wrong in the words
+of the tool that failed — the video encoder's own complaint about your file,
+not a number. Errors like a full disk are spelled out in English.
+
+It cannot rescue a clip that will not render. It can hand you something worth
+pasting into an [issue](https://github.com/kleZ799/stream-to-shorts/issues/new),
+which is the difference between a bug that gets fixed and one that does not.
+
 ### Fix any cut without re-running anything
 
 Click a clip and it opens in a player. Move the in and out points, mute it, save

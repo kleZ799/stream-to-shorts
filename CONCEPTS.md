@@ -646,6 +646,38 @@ except Exception:
 
 ---
 
+### Diagnosability as a reliability property
+
+A failure you cannot explain is worse than one you can, even when they fail
+identically. Every clip in a user's run failed, and the whole report was
+`returned non-zero exit status 3752568763` — a true statement carrying no
+information.
+
+Two separate losses produced that, and they are both general.
+
+**An error channel that goes nowhere.** ffmpeg had written one line explaining
+itself, to stderr. A windowed process has no console, so a child that inherits
+its handles writes into nothing. Suppressing a subprocess's output is cheap to
+write and costs exactly once — the first failure on a machine you cannot reach.
+The fix is to capture the stream rather than inherit it, which is also why
+`communicate()` matters: it drains both pipes concurrently, where naively
+reading one while the other fills its buffer deadlocks the child.
+
+**An error code nobody can read.** ffmpeg does not exit with 1. It exits with an
+`AVERROR` — a *namespaced* code, built by packing four ASCII bytes into an
+integer and negating it, so `AVERROR_EXTERNAL` is `-MKTAG('E','X','T',' ')`.
+Small negative values are reserved for `errno`, so the two namespaces share one
+signed integer without colliding. Then the process exit status carries it as
+unsigned 32-bit, and the negation wraps into a nine-digit positive number.
+
+> **The concept: an error is only as useful as its decoder.** Compact tagged
+> codes — FourCC here, `HRESULT` on Windows, `errno` everywhere — are cheap to
+> return and unreadable without the table that interprets them. Ship the table
+> with the thing that surfaces the error, or you have logged a checksum of the
+> problem rather than the problem.
+
+---
+
 ## 11. CS: security boundaries
 
 ### Path traversal

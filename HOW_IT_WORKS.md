@@ -1803,7 +1803,7 @@ dark-theme backgrounds, all of it fiction.
 ## 16a. Subprocesses: windows, and stopping them
 
 Everything external this app runs — ffmpeg, ffprobe, and yt-dlp's own ffmpeg
-calls — goes through `shorts_generator/proc.py`. Two unrelated problems share
+calls — goes through `shorts_generator/proc.py`. Three unrelated problems share
 that chokepoint, which is the reason it exists.
 
 ### Why a windowed build flashes black boxes
@@ -1824,6 +1824,40 @@ download runs several. Rather than fork it, `silence_console_windows()` changes
 suspicion, so it is kept narrow: Windows only, and only when `stdout.isatty()`
 is false, meaning there is no console to inherit. Run from a terminal, nothing
 is patched and output behaves normally.
+
+### Why a failed render used to say nothing
+
+`check=True` raises `CalledProcessError`, whose message is the command and an
+exit code. Both halves are less useful than they look.
+
+The code is not an exit code in the ordinary sense. ffmpeg exits with its own
+`AVERROR`: a negative value, which Windows hands back as unsigned 32-bit. A
+real bug report read *returned non-zero exit status 3752568763*, and that
+number is four bytes of ASCII — `-MKTAG('E','X','T',' ')`, `AVERROR_EXTERNAL`,
+"a library ffmpeg calls has failed", which during an encode means libx264.
+Reading it requires knowing to negate it first. `explain_exit_status()` does
+that arithmetic instead, and covers the `AVERROR(errno)` codes too, so
+`4294967268` prints as *No space left on device*.
+
+The reason itself had already been printed. `-loglevel error` means ffmpeg
+says one useful thing on the way out — to stderr, which the windowed build
+throws away for the reason in **1. No stdout** above: there is no console for
+the child to inherit, so it writes to a handle pointing nowhere. Every render
+failure then looked identical from outside, which is no help to the person
+reporting one and none at all to whoever reads the report.
+
+`run_checked()` captures stderr and puts its tail in the exception. The volume
+is bounded — `-loglevel error` prints a handful of lines, and `communicate()`
+drains the pipe — so capturing cannot fill a buffer and stall a long encode.
+Every ffmpeg and ffprobe call that has to succeed goes through it. The one that
+does not is the best-effort height probe in the downloader, which already
+answers 0 and carries on.
+
+The lesson is older than this fix. The downloader learned it first, when
+yt-dlp's `quiet` swallowed the ffmpeg stderr explaining why a merge failed and
+left a bug report saying only that something had. Suppressing a child's output
+is cheap to write and expensive exactly once: the first time something fails on
+a machine you cannot reach.
 
 ### Pausing work that is already running
 
