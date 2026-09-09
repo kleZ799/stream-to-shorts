@@ -371,6 +371,46 @@ async def cleanup_run() -> dict:
     return {"freed": freed, "removed": removed, "failed": failed, "count": len(removed)}
 
 
+def _select_in_explorer(target: Path) -> bool:
+    """Select one file in Explorer through the shell API. True if it worked.
+
+    Not `explorer /select,<path>`. That form hands Explorer a command line it
+    parses itself, splitting on the comma that introduces the argument — so
+    the moment a filename contains a comma, Explorer takes everything after it
+    as a separate argument and opens Documents instead. Clips are named after
+    their own titles now, and titles are full of commas, apostrophes and
+    ampersands; the button stopped landing on the file the day that shipped.
+
+    SHOpenFolderAndSelectItems is what Explorer uses internally. It takes the
+    path as data rather than as text to be re-parsed, so no character in a
+    filename can change what it means.
+    """
+    import ctypes
+    from ctypes import wintypes
+
+    shell32 = ctypes.windll.shell32
+    ole32 = ctypes.windll.ole32
+
+    shell32.ILCreateFromPathW.restype = ctypes.c_void_p
+    shell32.ILCreateFromPathW.argtypes = [wintypes.LPCWSTR]
+    shell32.SHOpenFolderAndSelectItems.argtypes = [
+        ctypes.c_void_p, wintypes.UINT, ctypes.c_void_p, wintypes.DWORD,
+    ]
+    # The id list comes from the COM task allocator, so that is what frees it.
+    # (shell32 exports ILFree too, but not on every Windows build.)
+    ole32.CoTaskMemFree.argtypes = [ctypes.c_void_p]
+
+    # Explorer is a COM apartment; the call needs one on this thread too.
+    ole32.CoInitialize(None)
+    item = shell32.ILCreateFromPathW(str(target))
+    if not item:
+        return False
+    try:
+        return shell32.SHOpenFolderAndSelectItems(item, 0, None, 0) == 0
+    finally:
+        ole32.CoTaskMemFree(item)
+
+
 def _open_in_file_manager(target: Path) -> None:
     """Show `target` in the OS file manager.
 
@@ -383,13 +423,15 @@ def _open_in_file_manager(target: Path) -> None:
     is_file = target.is_file()
     if os.name == "nt":
         if is_file:
-            # explorer's /select, takes one glued argument and rejects the
-            # quoting subprocess applies to a list, so hand it a command line.
-            # A Windows filename can never contain a quote, so this can't be
-            # broken out of — but check anyway, since it is a shell-ish call.
-            if '"' in str(target):
-                raise ValueError("That filename can't be shown safely.")
-            subprocess.run(f'explorer /select,"{target}"')   # noqa: S603 - local desktop app
+            try:
+                if _select_in_explorer(target):
+                    return
+            except Exception as e:
+                print(f"[reveal] could not select {target.name} ({e}); "
+                      f"opening its folder instead", flush=True)
+            # Whatever went wrong, landing in the right folder still answers
+            # "where is this on my PC" — which is the whole question.
+            os.startfile(str(target.parent))    # noqa: S606 - local desktop app
         else:
             os.startfile(str(target))       # noqa: S606 - local desktop app
     elif _sys.platform == "darwin":
