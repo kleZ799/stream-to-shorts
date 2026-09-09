@@ -23,7 +23,8 @@ import re
 from pathlib import Path
 from typing import Callable, Dict, List, Optional
 
-from . import muapi
+from . import boundaries, muapi, signals
+from .signals import AudioTrack
 
 
 LLMFn = Callable[[str], str]
@@ -128,9 +129,13 @@ Rules:
 - Clips must not overlap significantly with each other
 - {num_clips_instruction}
 - "first_line" is the exact transcript sentence the clip opens on, copied
-  verbatim. Write it out before you settle on start_time — if the line you are
-  about to copy is filler, setup, or a neutral observation, then the clip starts
-  in the wrong place and you must move start_time to a line that hooks.
+  verbatim, word for word, from the transcript above. Write it out before you
+  settle on start_time — if the line you are about to copy is filler, setup, or
+  a neutral observation, then the clip starts in the wrong place and you must
+  move start_time to a line that hooks. This line matters more than the number:
+  the cut is placed by finding this exact line in the transcript, so a
+  paraphrase, a summary, or a line you invented puts the clip in the wrong
+  place entirely.
 - "hook_sentence" is that same opening line
 - Score each clip TWICE, 0-100, independently. USE THE WHOLE SCALE. Anchors:
     90-100  once or twice in an entire stream. You would open the channel with it.
@@ -159,8 +164,12 @@ Respond ONLY with valid JSON (no markdown, no explanation):
 # overlap tail, so chunks ranked under v2 were asked a narrower question. v4
 # anchored the 0-100 scale: without anchors a real 96-candidate run came back
 # spread over 73-95, so the top-five cut was being made on gaps smaller than
-# the model's own noise. Cached v3 chunks are not comparable and must be redone.
-PROMPT_VERSION = 4
+# the model's own noise. v5 made first_line load-bearing -- the cut is now
+# placed by finding that line in the transcript rather than by trusting
+# start_time -- so a chunk ranked under v4 was answering a question where the
+# line was decoration. Cached older chunks are not comparable and must be
+# redone.
+PROMPT_VERSION = 5
 HOOK_SCORE_WEIGHT = 0.4       # how much the opening line counts toward the rank
 MAX_CLIP_SECONDS = 90         # reject anything the model returns above this
 CHUNK_SIZE_SECONDS = 1200       # 20-min chunks for long videos
@@ -508,6 +517,38 @@ def _save_checkpoint(path: Optional[Path], fingerprint: str,
         pass
 
 
+def finalize(
+    highlights: List[Dict],
+    transcript: Dict,
+    clip_seconds: Optional[List[float]] = None,
+    audio: Optional[AudioTrack] = None,
+    content_type: str = "",
+    reserve_seconds: float = 0.0,
+) -> List[Dict]:
+    """Turn the model's proposals into the spans that actually get cut.
+
+    Three passes, in this order for a reason:
+
+    1. Boundaries first. Snapping moves every span -- often by seconds, since
+       a clip is re-opened on its own hook line -- so measuring signals before
+       this would be measuring audio that is no longer in the clip.
+    2. Signals second, on the final spans, blending what the footage did into
+       what the model thought.
+    3. Dedupe last. Two candidates the model kept apart can land on top of
+       each other once both are snapped to the same sentence boundaries, and
+       shipping the same moment twice is worse than shipping one fewer clip.
+    """
+    highlights = boundaries.refine(
+        highlights, transcript,
+        clip_seconds=clip_seconds, audio=audio,
+        content_type=content_type, reserve_seconds=reserve_seconds,
+    )
+    signals.rescore(highlights, transcript, audio)
+    highlights = dedupe_highlights(highlights)
+    highlights.sort(key=lambda h: int(h.get("score", 0) or 0), reverse=True)
+    return highlights
+
+
 def get_highlights(
     transcript: Dict,
     num_clips: int = 3,
@@ -515,6 +556,8 @@ def get_highlights(
     checkpoint_path: Optional[Path] = None,
     clip_seconds: Optional[List[float]] = None,
     brief: str = "",
+    audio: Optional[AudioTrack] = None,
+    reserve_seconds: float = 0.0,
 ) -> Dict:
     """Main entry point — returns {highlights: [...]} sorted by score.
 
@@ -525,6 +568,10 @@ def get_highlights(
     request, and a nine-chunk video that dies on chunk three used to throw
     away the two it had already paid for -- so every finished chunk is written
     out, and a later attempt picks up where the quota ran out.
+
+    `audio` is the source's loudness envelope, when one could be measured. It
+    is what lets the ranking hear the clip rather than only read it, and what
+    tells the renderer where a hook replay should open.
     """
     llm_fn = llm_fn or call_muapi_llm
     duration = transcript.get("duration", 0)
@@ -564,10 +611,18 @@ def get_highlights(
             done[key] = ranked
             _save_checkpoint(checkpoint_path, fingerprint, done)
 
-        highlights = dedupe_highlights(all_highlights)
+        candidates = dedupe_highlights(all_highlights)
     else:
         text = build_transcript_text(transcript)
         result = call_highlight_api(text, content_info, duration, num_clips=num_clips, llm_fn=llm_fn, clip_seconds=clip_seconds, brief=brief)
-        highlights = dedupe_highlights(result.get("highlights", []))
+        candidates = dedupe_highlights(result.get("highlights", []))
 
+    highlights = finalize(
+        candidates, transcript,
+        clip_seconds=clip_seconds, audio=audio,
+        content_type=str(content_info.get("content_type") or ""),
+        reserve_seconds=reserve_seconds,
+    )
+    print(f"[rank] {len(highlights)} candidate(s) after snapping · "
+          f"{signals.summarise(highlights)}", flush=True)
     return {"highlights": highlights}
