@@ -9,18 +9,25 @@ def _env_file_candidates():
     """Directories a packaged run might reasonably keep a .env in.
 
     A bare load_dotenv() searches the current directory. The packaged build
-    chdirs to the user's Videos folder before anything here is imported, so
+    chdirs to the user's video folder before anything here is imported, so
     it searches a folder that has never held a .env — and someone who put
     their key in the repo's .env and then ran the .exe gets told the key "is
     not set", which is true only of the directory we happened to be standing
     in. Look beside the executable and in the config directory too.
+
+    The config directory is asked for rather than spelled out here, because
+    it is somewhere different on every platform and one wrong copy of that
+    answer is how a mac user's .env stops being read.
     """
     seen = []
     if getattr(sys, "frozen", False):
         seen.append(Path(sys.executable).resolve().parent)
-    appdata = os.environ.get("APPDATA")
-    if appdata:
-        seen.append(Path(appdata) / "StreamToShorts")
+    try:
+        from . import user_config
+
+        seen.append(user_config.config_dir())
+    except Exception:
+        pass        # an unreadable config dir is not a reason to fail to start
     return seen
 
 
