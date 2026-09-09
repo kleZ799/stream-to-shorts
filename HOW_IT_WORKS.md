@@ -199,9 +199,12 @@ shorts_generator/
 ├── user_config.py          per-user settings.json, output roots
 ├── usage.py                daily API-request ledger + Pacific day boundary
 ├── highlights.py           THE BRAIN — prompts, chunking, scoring, dedupe
+├── signals.py              loudness envelope, trigger phrases, hook score
+├── boundaries.py           snap spans to sentences; enforce clip length
+├── hook_open.py            prepend a late payoff to the front of a clip
 ├── layout_spec.py          natural language → LayoutSpec; quality ladder
 ├── render.py               one entry point that dispatches a LayoutSpec
-├── seo.py                  per-clip title / description / tags / hashtags
+├── seo.py                  subject detection, titles, tags, hashtags
 │
 ├── downloader.py           api mode: MuAPI /youtube-download
 ├── transcriber.py          api mode: MuAPI /openai-whisper
@@ -260,14 +263,20 @@ fetch_video_meta()                    ← title/channel/tags, best-effort
 transcribe_local()                    ← stage: transcribe (bar 0.15 → 0.55)
       │
       ▼
-get_highlights(checkpoint_path=…)     ← stage: rank       (bar 0.55 → 0.70)
+analyse_audio()                       ← one loudness envelope for the whole VOD
+      │
+      ▼
+get_highlights(audio=…, reserve=…)    ← stage: rank       (bar 0.55 → 0.70)
+  └ finalize(): snap boundaries → rescore → dedupe
 sort by score, take top N
       │
       ▼
+detect_subject()                      ← what the video is about, named once
 attach_seo()                          ← titles, descriptions, tags
       │
       ▼
 render_highlights(spec)               ← stage: render     (bar 0.70 → 1.00)
+  └ hook_open.apply() on each clip whose payoff lands late
       │
       ▼
 _finalize() → _persist()              ← job.json written beside the clips
@@ -500,6 +509,137 @@ It asks the model for roughly **2× the requested clip count** so dedupe has
 headroom, capped so the model doesn't have to emit a huge JSON payload — which
 times out smaller models mid-object.
 
+### 6.9 `finalize()` — the model's answer is not the last word
+
+Everything above produces *candidates*. `finalize()` turns them into the spans
+that actually get cut, in three passes whose order is load-bearing:
+
+```python
+highlights = boundaries.refine(...)   # 1. move the span
+signals.rescore(...)                  # 2. re-rank it on what the audio did
+highlights = dedupe_highlights(...)   # 3. drop what now collides
+```
+
+1. **Boundaries first.** Snapping moves every span, often by seconds, because a
+   clip is re-opened on its own hook line. Measuring signals before this would
+   be measuring audio that is no longer inside the clip.
+2. **Signals second**, on the final spans.
+3. **Dedupe last.** Two candidates the model kept apart can land on top of each
+   other once both are snapped to the same sentence boundaries.
+
+### 6.10 Measured signals — `signals.py`
+
+A transcript cannot carry a scream, a laugh, or the half-second of silence
+before a punchline. Two moments can read identically on the page and be worlds
+apart in the audio, and the audio is what a viewer meets first. So four things
+are measured directly from the footage and folded into the rank.
+
+**The envelope.** `analyse_audio()` runs one ffmpeg decode of the whole source
+to mono 16-bit at **4 kHz**, streams the PCM back through a pipe, and reduces it
+to **one RMS value per 0.25s**. Streaming matters: a four-hour VOD is gigabytes
+of PCM even at that rate, and all that survives the read is ~60,000 floats.
+Every audio signal is derived from that one array.
+
+Normalisation is against **percentiles of the video's own distribution**, not
+min/max — one clipped frame would otherwise define the whole scale and every
+real moment would score within a few points of every other.
+
+```python
+BASE_WEIGHTS = {
+    "audio_spike":     0.30,   # peak vs the video's own p95
+    "keyword":         0.25,   # trigger phrases, weighted by strength
+    "chat_velocity":   0.20,   # not obtainable — no chat log
+    "face_reaction":   0.15,   # not obtainable — too expensive per frame
+    "silence_to_peak": 0.10,   # quiet run-up before the spike
+}
+```
+
+The two unobtainable signals are **redistributed, not zeroed**. Scoring them 0
+would shrink every clip's ceiling and make an 80 from a video with no chat log
+mean something different from an 80 with one.
+
+**Coverage caps how far measurement can move a rank.** Redistribution keeps the
+scale honest but cannot manufacture confidence: with no audio the whole score
+rests on one keyword list, and a clip containing the words *"no way"* would
+otherwise score a flat 100 and outrank everything the model actually understood.
+So the measured half's share is scaled by how much of the obtainable evidence
+was actually obtained — all of it with audio, 38% without.
+
+```python
+share   = SIGNAL_WEIGHT * coverage(measured)     # SIGNAL_WEIGHT = 0.38
+blended = (1 - share) * model_score + share * measured_score
+```
+
+**Dialogue density is a penalty, not a weight.** Two seconds of near-silence at
+the top of a Short is the one failure that is disqualifying rather than merely
+bad, so it scales the blend down by up to 35% instead of nudging an average.
+It is only measured when a transcript exists — zero words counted with no
+transcript means *"we did not look"*, not *"this clip opens on silence"*.
+
+Every sub-signal is kept on the highlight and written into `job.json`. The rule
+book those weights come from is explicit that they are seed values to be
+corrected against real retention data; that correction is impossible against
+outcomes nobody recorded. Reading YouTube Analytics back in is not built — this
+is the half of the loop that can exist without an OAuth flow.
+
+### 6.11 Boundaries — `boundaries.py`
+
+**Length is arithmetic.** Ask a model for 30-second clips and it returns 19s,
+24s, 47s: it is estimating durations from timestamps it half remembers while
+also writing JSON. So the length is enforced in code. `_choose_end()` walks
+whole transcript segments forward from the opening and picks:
+
+| The model's end time | What happens |
+|---|---|
+| Inside the band | Kept, snapped to the end of the sentence it lands in |
+| Short of the band | Extended to the boundary nearest the band's **middle** — someone who typed "30 seconds" wants 30, and a run of 26s clips is the same complaint in a different shape |
+| Past the band | Cut at the **last** boundary that fits, keeping as much of the payoff as the length allows |
+| No boundary fits | The first one past the ceiling if it overruns by under 2.5s, else a cut at the ceiling on the quietest instant |
+
+Because it moves in whole segments, enforcing a length can never cut mid-word.
+
+**The opening is placed by the line, not the number.** The prompt asks for
+`first_line` — the exact sentence the clip opens on — and the model quotes it
+accurately while pairing it with a timestamp that routinely lands seconds early,
+on the throat-clear before it. `find_hook_segment()` therefore searches the
+transcript for that line by word overlap (≥60% of its tokens, distance only
+breaking ties) and opens the clip there, with at most ~0.35s of runway and never
+into the previous speaker's tail. A clip whose first two seconds fall below the
+dialogue-density floor steps forward up to four segments to find one that does
+not.
+
+Both cut points are then nudged to the quietest instant within ±0.4s, because a
+cut in a gap is inaudible and a cut on a loud frame is not.
+
+`reserve_seconds` shortens the band before any of this, so the room the hook
+cold open will take is held back rather than added on top — which is why
+30-second clips are still 30 seconds once it is on the front.
+
+### 6.12 The hook cold open — `hook_open.py`
+
+Opening on the hook line is the right answer when the hook *is* the opening
+line. Some moments are a build and a payoff, and the payoff — a scream, a
+laugh, the thing going wrong — is what stops a scroll. Open on the build and the
+first second is someone talking quietly.
+
+So a clip whose loudest moment lands more than 3s in gets 1.9s of that moment
+played first, then the clip in full. One ffmpeg pass over the **rendered** clip,
+splitting and concatenating its own frames, so the teaser is guaranteed to match
+the layout exactly:
+
+```
+[0:v]split=2[va][vb];[0:a]asplit=2[aa][ab];
+[va]trim=start=A:end=B,setpts=PTS-STARTPTS[v0];  …
+[v0][a0][v1][a1]concat=n=2:v=1:a=1[v][a]
+```
+
+It returns `None` — leaving the plain cut in place — when there is no audio
+envelope to find a peak in, when the peak is already at the front, or when
+anything at all goes wrong. A garnish must never cost a render.
+
+Exports are also normalised to **-14 LUFS** (`render.LOUDNESS_FILTER`), the
+target all three platforms mix toward.
+
 ---
 
 ## 7. The three renderers
@@ -700,6 +840,36 @@ in **one call for the whole batch**, not one per clip. Ten separate calls would
 take ten times as long and give the model no way to stop the titles repeating
 each other.
 
+### Naming the subject once — `detect_subject()`
+
+A title that does not name its subject is invisible outside the feed: it holds
+no word anyone would search or browse for. The prompt has always demanded the
+name, but the model had to find it per clip from whatever the transcript
+happened to say — and for a stream that is usually nothing. Nobody announces
+the game they are playing every ten minutes.
+
+So one extra call, before any title is written, asks what the video is *about*
+from its own listing plus a sample of what is said, and returns a small fixed
+vocabulary for the whole run:
+
+```json
+{"subject": "Elden Ring", "kind": "game", "also_known_as": ["ER"],
+ "hashtags": ["#eldenring", "#soulsgames"], "tags": ["elden ring", "boss fight"]}
+```
+
+`subject_block()` states it to the metadata writer as a requirement — every
+title must place the clip in that subject — and the vocabulary is then enforced
+in code rather than trusted to the prompt. `_merge_hashtags()` puts `#shorts`
+first, the run's controlled tags next, and the model's own suggestions behind
+them; the subject's name leads every tag list whatever came back. Ten clips
+inventing ten ways to say the same thing compete in ten narrow slices of the
+feed instead of stacking in one.
+
+The subject is stored on the `Job` and written into `job.json`, so a rewrite
+months later files the clips under the same name as the original run. An empty
+subject is a valid answer — it means the titles are written from the clips
+alone, exactly as before.
+
 ### The two rules that outrank everything
 
 1. **Accurate.** Every claim must be provable from that clip's own transcript,
@@ -761,6 +931,20 @@ again. `safe_stem()` makes that survive a filesystem and a URL path segment:
 emoji and the characters Windows forbids are dropped, combining marks are kept
 (losing them turned Hindi's `क्या` into `क य`), reserved device names and
 over-long stems fall back, and collisions take a `_2` suffix.
+
+### Editing it yourself — `apply_edit()`
+
+All four fields were already editable in the panel, and the edit was thrown away
+the next time it rendered. Editable text you cannot save is worse than read-only
+text, because it looks like it worked.
+
+`PUT /api/jobs/{id}/clips/{file}/seo` merges whatever fields were sent into the
+clip's metadata, renames the mp4 to match a new title, and persists. It applies
+YouTube's **limits** — a 130-character title is rejected whoever typed it — but
+not the house **style**: the no-hashtags-in-titles rule exists to stop a model
+padding, and someone who types one into their own title meant it. The entry is
+marked `edited`, which is what makes Rewrite ask before replacing hand-written
+words.
 
 ### Finding the words for old clips
 
@@ -1866,6 +2050,21 @@ is now `MAX_TRIM_SECONDS`.
 `LOCAL_OUTPUT_RESOLUTION`. The README still described clips starting 2–5s
 *before* the moment, which `COLD_OPEN_RULES` had reversed.
 
+**Show file opened the wrong folder for most clips.** Explorer was handed
+`explorer /select,<path>` — a command line it parses itself, splitting on the
+comma that introduces the argument. Once clips were named after their own
+titles, and titles are full of commas, everything after the first one was read
+as a separate argument and Explorer fell back to Documents. It now goes through
+`SHOpenFolderAndSelectItems`, which takes the path as data rather than as text
+to be re-parsed. The lesson generalises: a shell-ish call that worked for
+`short_01.mp4` is not proof it works for a filename a person would recognise.
+
+**The learning loop is half-built.** Every clip's signal values and both scores
+are written into `job.json`, which is the record the rule book's Part 6 needs —
+but nothing reads YouTube Analytics back in, so the weights in `signals.py` are
+still hand-set seeds rather than anything derived from this channel's own
+retention. That is an OAuth flow and a correlation pass away.
+
 ---
 
 ## 18. HTTP API reference
@@ -1934,6 +2133,7 @@ rather than guessing from what the button last did.
 | `POST …/clips/{file}/save` | Copy out of the working folder into the save location |
 | `DELETE …/clips/{file}` | Delete the clip and its file |
 | `POST /api/jobs/{id}/seo` | Write or rewrite upload metadata (`?force=true` to overwrite) |
+| `PUT …/clips/{file}/seo` | Save metadata the user typed; renames the mp4 to a new title |
 | `POST /api/jobs/{id}/reveal` | Show a clip in the file manager |
 
 ---

@@ -150,6 +150,13 @@ Each card carries its score and the exact span it was cut from.
 
 <img src="assets/screenshots/03-clips.png" alt="Four finished clips in a grid, each with a score and timestamps" width="880">
 
+### The title is yours to rewrite
+
+Every clip comes back with a title, a description, tags and an on-screen hook,
+written from what is actually said in it. All four are editable, and **Save
+changes** keeps your wording — the mp4 on your PC is renamed to match the new
+title, so what is in the folder is always what goes into YouTube's title box.
+
 ### Fix any cut without re-running anything
 
 Click a clip and it opens in a player. Move the in and out points, mute it, save
@@ -432,9 +439,13 @@ flowchart LR
     D -->|yes| E[chunk: 20 min<br/>60s overlap]
     D -->|no| F[LLM ranking<br/>stream-aware prompt]
     E --> F
-    F --> G[dedupe<br/>drop >50% overlap]
-    G --> H[ffmpeg vstack<br/>webcam over gameplay]
-    H --> I[short_01..05.mp4<br/>1080×1920]
+    B --> J[loudness envelope<br/>spikes, silences, peaks]
+    J --> F
+    F --> G[snap to sentences<br/>hook first, length enforced]
+    G --> K[dedupe<br/>drop >50% overlap]
+    K --> H[ffmpeg vstack<br/>webcam over gameplay]
+    H --> I[hook cold open<br/>-14 LUFS]
+    I --> L[titled mp4s<br/>1080×1920]
 ```
 
 Four stages, and **every expensive one is cached.**
@@ -465,6 +476,37 @@ And then the hard rule: **every highlight must contain the streamer's own speech
 
 Ranking prioritises, in order: reactions to story beats → raw unscripted spikes → fails and disasters → hot takes → chat interaction → personal tangents → quotable one-liners → sincerity. Dead air, loading screens, and stream housekeeping are explicitly skipped, and clips start *on* the hook rather than the run-up — a Short is judged in its first second, so the opening line has to earn the watch by itself.
 
+**But a transcript cannot hear anything.** The model reads words on a page; it
+never meets the scream, the laugh, or the half-second of silence before the
+punchline, and two moments that read identically can be worlds apart in the
+audio. So the source's loudness is measured too — once per run, streamed
+through ffmpeg into one number per quarter-second — and four measured signals
+are folded into the rank alongside the model's opinion:
+
+| Signal | What it catches |
+|---|---|
+| **Audio spike** | The peak of the clip against the video's *own* baseline, so one loud scene can't make every span look like a hook |
+| **Trigger phrases** | A short fixed list — *no way*, *wait for it*, *I can't believe* — weighted by how hard each lands, and counted double in the opening line |
+| **Silence-to-peak** | A quiet beat right before the spike. Build-up → payoff reads as a moment; a flat loud run-up reads as noise |
+| **Dialogue density** | Words per second in the first two seconds. Below the floor is dead air, which is the single most reliable way to lose a viewer |
+
+How much those move a rank is scaled by how much of them was actually
+measurable, so a video with no readable audio leans on the model rather than on
+one keyword list. Every clip keeps its own numbers in `job.json` beside it —
+the model's score, the measured one, each sub-signal — so the weights can one
+day be corrected against real retention instead of being trusted forever.
+
+**Then the span is snapped to something real.** Ask for 30-second clips and a
+model hands back 19s, 24s, 47s: it is estimating durations from timestamps it
+half remembers while also writing JSON. Length is arithmetic, so it is done in
+code — the span is walked out to whole transcript segments until it lands in
+the band you asked for, aiming near the middle when the model stopped short and
+keeping as much of the payoff as fits when it ran long. Snapping to sentence
+boundaries is what stops that from cutting mid-word. The opening is placed the
+same way: by finding the model's quoted hook line in the transcript rather than
+trusting the timestamp it paired with it, which routinely lands seconds early on
+the throat-clear before it.
+
 Long VODs get chunked into 20-minute windows with 60s of overlap, each rebased to zero and offset back afterward. Anything overlapping >50% with a higher-scoring pick is dropped, so you never get two near-identical clips.
 
 Every clip comes back with a score, a title, and a one-line reason it should work.
@@ -472,6 +514,17 @@ Every clip comes back with a score, a title, and a one-line reason it should wor
 ### 4. Render
 
 Cut and stack in one ffmpeg pass, straight to 1080×1920 h264 with `+faststart`. Upload-ready for Shorts, Reels, and TikTok with no server-side re-encode.
+
+Two things happen on the way out. Audio is normalised to **-14 LUFS**, the
+target all three platforms mix toward — a Short that plays quieter than the one
+before it in the feed reads as lower production value before a word of it is
+heard. And a clip whose loudest moment lands late opens with **a second of that
+moment first**, then plays in full: the payoff arrives before the viewer has
+decided whether to stay. It skips itself when the peak is already at the front,
+where a replay would just be a stutter, and the length it adds is reserved
+before the cut is chosen — so 30-second clips are still 30 seconds with it on.
+Turn it off with the switch in the Render panel, or by writing *no hook repeat*
+in the prompt.
 
 ---
 
@@ -557,6 +610,8 @@ where those two download URLs live.
 
 | Type this | You get |
 |---|---|
+| `30 second clips` | the length every clip is cut to — enforced in code, not requested of the model |
+| `no hook repeat` | turn off the cold open that puts the payoff first |
 | `webcam at the top` | the stacked layout |
 | `my webcam is bottom right` | which corner to hunt for your overlay |
 | `square, bigger webcam` | 1:1, panel at 55% |
@@ -608,6 +663,10 @@ The knobs that change output quality most, in order:
 | `CAM_PANEL_FRACTION` | `local/gaming_layout.py` | Webcam panel height, `0.42` by default |
 | `FACE_CONTEXT_MULTIPLE` | `local/gaming_layout.py` | Webcam zoom. Lower is tighter on your face |
 | `MAX_CLIP_SECONDS` | `shorts_generator/highlights.py` | Hard reject above 90s. The prompt separately targets 18–35s, because the completion bar gets stricter the longer a clip runs |
+| `MODEL_WEIGHT` | `shorts_generator/signals.py` | How much of the rank is the model's opinion versus the measured audio. `0.62` by default — lower it if the ranking keeps picking moments that read well and land flat |
+| `TRIGGER_PHRASES` | `shorts_generator/signals.py` | The reaction phrases that score as a hook, weighted. Add the ones **you** actually say |
+| `TARGET_BY_KIND` | `shorts_generator/boundaries.py` | Clip length per content type, when the prompt names no length of its own |
+| `REPLAY_SECONDS` | `shorts_generator/hook_open.py` | How long the hook cold open runs, `1.9s` by default |
 | Provider | Settings | Gemini, Groq or OpenAI. Add a **free Groq key** as a fallback so a busy Gemini cannot end a run |
 | `LOCAL_WHISPER_MODEL` | `.env` | `base` is plenty for ranking. `small` reads better and hallucinates less — and on a GPU it is *faster* than `base`, so use it if you have one |
 | Spoken language | Render panel | English by default. Pinning it is the fix for whisper inventing text in another language |
@@ -691,6 +750,10 @@ Whichever transcriber ran, `highlights.py` can't tell the difference. The LLM is
 shorts_generator/
 ├── pipeline.py            # orchestrator — picks local vs api
 ├── highlights.py          # the brain: prompts, chunking, dedupe
+├── signals.py             # loudness envelope + trigger phrases → measured hook score
+├── boundaries.py          # snap spans to sentences; enforce the length asked for
+├── hook_open.py           # the cold open that puts a late payoff first
+├── seo.py                 # subject detection, titles, tags, hashtags
 └── local/
     ├── downloader.py      # yt-dlp + download cache
     ├── transcriber.py     # faster-whisper + .srt cache
@@ -698,6 +761,12 @@ shorts_generator/
     ├── clipper.py         # face-tracking crop (talking-head footage)
     └── gaming_layout.py   # webcam-over-gameplay stack (streams)
 ```
+
+`highlights.py` is still the only place that talks to a model about ranking.
+What changed is that its answer is no longer the last word: `finalize()` runs
+the model's candidates through `boundaries.refine()` and then `signals.rescore()`
+before deduping, so the spans that reach the renderer are ones snapped to real
+sentence boundaries and ranked partly on what the audio did.
 
 ## Staying in sync with upstream
 

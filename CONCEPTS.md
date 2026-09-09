@@ -31,6 +31,7 @@ engineering is.
 3. [AI/ML: speech recognition](#3-aiml-speech-recognition)
 4. [AI/ML: working with LLMs](#4-aiml-working-with-llms)
 5. [AI/ML: computer vision](#5-aiml-computer-vision)
+5a. [AI/ML: audio signal processing and feature fusion](#5a-aiml-audio-signal-processing-and-feature-fusion)
 6. [CS: concurrency and the job model](#6-cs-concurrency-and-the-job-model)
 7. [CS: the web layer](#7-cs-the-web-layer)
 8. [CS: algorithms actually used here](#8-cs-algorithms-actually-used-here)
@@ -275,6 +276,112 @@ tradeoff, not an oversight.
 **Sampling:** the face is located from several frames, not one, and the results
 are aggregated (`from 5/6 samples` in the logs). One frame can catch a blink, a
 turn, or a transition; sampling is cheap variance reduction.
+
+---
+
+## 5a. AI/ML: audio signal processing and feature fusion
+
+**Files:** `shorts_generator/signals.py`, `boundaries.py`
+
+The ranking model reads a transcript. A transcript is a lossy projection of the
+thing you actually care about: it keeps the words and throws away the volume,
+the timing, and the silence. Two moments can be identical on the page and
+opposite in the room. So a second, cheaper modality is measured directly.
+
+### The envelope: from a waveform to 60,000 numbers
+
+Audio at 48 kHz stereo is far more information than a hook detector needs. What
+is wanted is an **amplitude envelope** — how loud, over time — so the signal is
+reduced hard before anything looks at it:
+
+1. **Downmix and downsample** to mono 16-bit at 4 kHz. Loudness is a
+   low-frequency-of-change property; the Nyquist limit this violates for
+   *listening* is irrelevant for *measuring energy*.
+2. **Frame** into 0.25s windows and take the **RMS** of each —
+   `sqrt(mean(x²))`, the standard energy measure, rather than a peak, because a
+   single sample spike is not loudness.
+3. **Stream it.** A four-hour VOD is gigabytes of PCM even at 4 kHz. Reading it
+   through a pipe in blocks and keeping only the per-window result means memory
+   stays flat regardless of source length — the array that survives is one
+   float per quarter second.
+
+### Normalising against the signal's own distribution
+
+Comparing raw RMS between videos is meaningless — microphones, mixes and
+mastering differ. Comparing against the video's **own** distribution is not.
+The naive choice is min/max scaling, and it is wrong here: one clipped frame
+sets the maximum and compresses every real moment into a narrow band at the
+bottom. **Percentile anchors** (p50 for the "quiet" threshold, p95 for the
+spike scale) are robust to exactly that outlier.
+
+This is the same reasoning behind robust statistics elsewhere in the project —
+the webcam rectangle is a **median** of several detections, not a mean, so one
+bad frame cannot drag the framing off.
+
+### Weighted feature fusion, and the missing-feature problem
+
+Five signals, each normalised to 0–1, combined by fixed weights into one score.
+Two of them (live-chat velocity, facial reaction) are not obtainable in this
+system. The interesting question is what to do about that.
+
+- **Scoring them zero is wrong.** It silently lowers the ceiling: the best clip
+  in a video with no chat log could never score above 80, so scores stop being
+  comparable across videos — which is the one thing a score has to be.
+- **Redistributing their weight** across the available signals keeps the scale
+  intact. An 80 means the same thing either way.
+
+But redistribution has a failure mode of its own, and it is worth being able to
+name: **it preserves the range while inflating the confidence.** With no audio,
+the entire score collapses onto one keyword list, and a clip containing the
+words *"no way"* scores a flat 100 — outranking everything the model actually
+understood. So a second term is needed:
+
+```python
+coverage = measured_weight / obtainable_weight     # 1.0 with audio, 0.385 without
+share    = SIGNAL_WEIGHT * coverage
+blended  = (1 - share) * model_score + share * measured_score
+```
+
+Redistribution fixes the *scale*; coverage fixes the *authority*. Evidence you
+could not gather should move your conclusion less, not differently.
+
+### Hard constraints are not features
+
+Dialogue density in the opening two seconds is deliberately **not** in the
+weighted sum. It is a disqualifier: below the floor, the blend is scaled down by
+up to 35%. A weighted average lets a strong signal buy off a fatal one — a very
+loud clip could out-vote the fact that its first two seconds are silence. Some
+conditions are not tradeable, and modelling them as weights says the opposite.
+
+The mirror of that: zero words counted when there is *no transcript* means "we
+did not look", not "there is silence". A missing measurement and a measurement
+of zero must never share a representation.
+
+### Post-hoc enforcement over prompt compliance
+
+The clearest lesson in this part of the system is about the division of labour
+between a model and the code around it.
+
+Asked for 30-second clips, an LLM returns 19s, 24s, 47s. This is not
+disobedience — it is being asked to do arithmetic over timestamps it half
+remembers while simultaneously holding a JSON schema and making an editorial
+judgement. Adding *"this is a HARD requirement"* to the prompt buys a little
+compliance and no guarantee.
+
+The fix is to split the request by what each side is actually good at:
+
+| Asked of the model | Enforced in code |
+|---|---|
+| *Which* moment is worth clipping | How long the clip runs |
+| *Which line* it should open on | Where that line is in the timeline |
+| Why it works, and how to title it | That it does not cut mid-sentence |
+
+The second column is deterministic, testable, and free. The first is the part
+only a model can do. Notice too that the model's own answer is used to derive
+the timing — `first_line` is quoted accurately even when the timestamp beside it
+is wrong, so the code searches the transcript for the line rather than trusting
+the number. **Take the part of an answer a model is reliable at, and compute the
+rest.**
 
 ---
 
@@ -883,6 +990,15 @@ Ordered by value, with the reasoning that makes each defensible:
 3. **Evaluation against real retention data.** Everything about the ranking
    rubric is currently assumed. Published Shorts produce retention curves; those
    are labels. Without them, "viral potential" is an untested hypothesis.
+
+   Half of this now exists: every clip's feature vector and both of its scores
+   are written into `job.json` beside it, so the training set is accumulating
+   whether or not anything reads it yet. What is missing is the other half —
+   an OAuth flow to the YouTube Analytics API, and a correlation pass that
+   re-derives the weights in `signals.py` from *this channel's* median
+   retention rather than from a rule book. Note the shape of that problem: it
+   is not a modelling challenge, it is a plumbing one, and the recording had to
+   come first because you cannot correlate against outcomes nobody wrote down.
 
 4. **Surface degraded output in the UI.** `generated: False` is recorded but a
    degraded run looks identical to a good one until you notice the filenames.
