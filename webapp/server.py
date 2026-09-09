@@ -60,6 +60,9 @@ class JobRequest(BaseModel):
     language: Optional[str] = "en"
     use_llm: bool = True
     aspect_ratio: Optional[str] = None
+    # The checkbox in the render panel. None means "whatever the prompt said",
+    # which is how a client that predates the toggle still behaves.
+    hook_replay: Optional[bool] = None
 
 
 # --- routes ---------------------------------------------------------------
@@ -610,6 +613,8 @@ async def create_job(req: JobRequest) -> dict:
 
     spec = await asyncio.to_thread(parse_layout_prompt, req.prompt, None, req.use_llm)
     _override_aspect(spec, req.aspect_ratio)
+    if req.hook_replay is not None:
+        spec.hook_replay = bool(req.hook_replay)
     if req.num_clips:
         spec.num_clips = req.num_clips
         spec.validate()
@@ -855,6 +860,60 @@ async def trim_clip(job_id: str, filename: str, req: TrimRequest) -> dict:
         "edited": True,
     })
 
+    return updated or {}
+
+
+class SeoEditRequest(BaseModel):
+    """A clip's upload metadata as the user typed it.
+
+    Every field is optional and only what is sent gets changed, so the title
+    box alone can be saved without the description riding along behind it.
+    """
+    title: Optional[str] = None
+    description: Optional[str] = None
+    # Accepted as the comma-separated string the tag box actually contains,
+    # or as a list, so both the UI and a script can post here.
+    tags: Optional[object] = None
+    hook_text: Optional[str] = None
+
+
+@app.put("/api/jobs/{job_id}/clips/{filename}/seo")
+async def edit_seo(job_id: str, filename: str, req: SeoEditRequest) -> dict:
+    """Save metadata the user wrote themselves.
+
+    The generated title is a starting point, not a verdict — nobody knows
+    their own channel better than the person running it. Saving one renames
+    the file too, exactly as a rewrite does, so what is on disk keeps matching
+    what will be typed into YouTube.
+    """
+    from shorts_generator.seo import apply_edit
+
+    job = _job_or_404(job_id)
+    safe = os.path.basename(filename)
+    clip = STORE.clip(job, safe)
+    if clip is None:
+        raise HTTPException(404, "No such clip")
+
+    edit = {k: v for k, v in req.model_dump().items() if v is not None}
+    if not edit:
+        raise HTTPException(400, "Nothing to save.")
+
+    try:
+        seo = apply_edit(clip.get("seo"), edit)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+    STORE.set_seo(job, safe, seo)
+
+    updated = STORE.clip(job, safe)
+    if "title" in edit:
+        new_name = await asyncio.to_thread(
+            rename_to_title, Path(job.out_dir), safe, seo.get("title") or "")
+        if new_name != safe:
+            updated = STORE.replace_clip(job, safe, {
+                "file": new_name,
+                "url": f"/api/jobs/{job.id}/clips/{new_name}",
+            })
     return updated or {}
 
 

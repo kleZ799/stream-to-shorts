@@ -1128,6 +1128,7 @@ async function run() {
       download_format: $("format").value,
       language: $("spokenLang").value,
       aspect_ratio: aspectChoice || null,
+      hook_replay: $("hookReplay").checked,
     }));
   } catch (e) {
     showErr(e.message);
@@ -1629,7 +1630,66 @@ function renderSeo() {
       count.classList.toggle("over", $("sfTitle").value.length > 100);
     });
   }
+
+  // Editing was already possible; keeping the edit was not. Every box now
+  // arms the Save button, so a title you rewrote survives closing the panel
+  // instead of being thrown away the next time this renders.
+  seoDirty = false;
+  $("seoSave").disabled = true;
+  $("seoSave").textContent = "Save changes";
+  ["sfTitle", "sfDesc", "sfTags", "sfHook"].forEach((id) => {
+    const el = $(id);
+    if (el) el.addEventListener("input", markSeoDirty);
+  });
 }
+
+let seoDirty = false;
+
+function markSeoDirty() {
+  seoDirty = true;
+  $("seoSave").disabled = false;
+}
+
+// Save the words in the boxes, whoever wrote them. The server renames the mp4
+// to match a new title, so the open player has to be pointed at the new name.
+async function saveSeo() {
+  const c = clips[cur];
+  if (!c || !c.file) return;
+  const btn = $("seoSave");
+  btn.disabled = true;
+  btn.textContent = "Saving…";
+  $("seoMsg").innerHTML = "";
+  try {
+    const body = {
+      title: $("sfTitle").value,
+      description: $("sfDesc").value,
+      tags: $("sfTags").value,
+      hook_text: $("sfHook").value,
+    };
+    const d = await api(
+      `/api/jobs/${encodeURIComponent(jobOf(c))}/clips/${encodeURIComponent(c.file)}/seo`,
+      json("PUT", body));
+    const renamed = d.file && d.file !== c.file;
+    patchClip(cur, { seo: d.seo, file: d.file, url: d.url });
+    if (renamed) {
+      const at = vid.currentTime, playing = !vid.paused;
+      vid.src = `${d.url}?v=${Date.now()}`;
+      vid.currentTime = at;
+      if (playing) vid.play().catch(() => {});
+      $("pDownload").href = d.url;
+      $("pDownload").setAttribute("download", d.file);
+    }
+    $("pTitle").textContent = (d.seo && d.seo.title) || d.title || "Untitled";
+    seoDirty = false;
+    btn.textContent = "Saved";
+    toast(renamed ? "Saved — the file was renamed to match." : "Saved.");
+  } catch (e) {
+    $("seoMsg").innerHTML = `<div class="err">${esc(e.message)}</div>`;
+    btn.disabled = false;
+    btn.textContent = "Save changes";
+  }
+}
+$("seoSave").onclick = saveSeo;
 
 function toggleSeo() {
   const p = $("player");
@@ -1653,7 +1713,22 @@ $("seoCopyAll").onclick = () => {
   ].join("\n\n"), "Title, description, tags and hook copied.");
 };
 
-$("seoRedo").onclick = async () => {
+$("seoRedo").onclick = () => {
+  const c = clips[cur];
+  if (!c) return;
+  // A rewrite replaces every box, including ones somebody typed by hand.
+  // Losing your own title to a button you meant to press once is the kind of
+  // thing you only forgive an app once.
+  if (seoDirty || (c.seo && c.seo.edited)) {
+    ask("Rewrite over your own words?",
+        "This clip has a title you edited. Rewriting replaces it, along with the "
+        + "description, tags and hook.", rewriteSeo);
+    return;
+  }
+  rewriteSeo();
+};
+
+async function rewriteSeo() {
   const c = clips[cur];
   if (!c) return;
   const btn = $("seoRedo");
@@ -1696,7 +1771,7 @@ $("seoRedo").onclick = async () => {
     busy(false);
     btn.disabled = false;
   }
-};
+}
 
 // ---------------------------------------------------------------- trim
 
