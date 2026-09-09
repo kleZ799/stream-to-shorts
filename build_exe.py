@@ -124,9 +124,12 @@ def _stamp_bundle(app: Path) -> None:
         "MIT licence. Source: github.com/klez799/stream-to-shorts")
 
     # The window is a view onto a server this app runs itself, on 127.0.0.1
-    # over plain http. App Transport Security blocks that by default, and the
-    # symptom is not an error -- it is a window that comes up blank while
-    # everything behind it works perfectly.
+    # over plain http, and App Transport Security blocks that by default --
+    # with no error, just a window that comes up blank while everything behind
+    # it works perfectly. pywebview does patch this into the bundle's info
+    # dictionary at runtime, so this is a second lock on the same door: it is
+    # declared rather than assumed, and it survives pywebview changing its
+    # mind about doing that.
     ats = data.setdefault("NSAppTransportSecurity", {})
     ats["NSAllowsLocalNetworking"] = True
 
@@ -277,9 +280,18 @@ def main() -> int:
     # PyInstaller to go and find pythonnet, which is not there and never
     # will be.
     if MAC:
+        # The four frameworks webview/platforms/cocoa.py imports at module
+        # level, named individually rather than trusted to the analyser:
+        # PyObjC spreads them across separate distributions, and a backend
+        # that half-imports does not fail at build time. It fails on the
+        # user's Mac, as a window that never opens.
         platform_args = [
             "--hidden-import", "webview.platforms.cocoa",
             "--hidden-import", "objc",
+            "--hidden-import", "AppKit",
+            "--hidden-import", "Foundation",
+            "--hidden-import", "WebKit",
+            "--hidden-import", "PyObjCTools.AppHelper",
             "--collect-all", "objc",
             "--osx-bundle-identifier", BUNDLE_ID,
         ]

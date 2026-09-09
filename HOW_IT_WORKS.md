@@ -1487,8 +1487,10 @@ about:
 
 Two more things happen after PyInstaller finishes. `Info.plist` gets
 `NSAllowsLocalNetworking`, because the window loads `http://127.0.0.1` and App
-Transport Security otherwise blocks it — with no error, just a blank window
-over a server working perfectly. And the bundle is signed ad-hoc, along with
+Transport Security blocks that by default — with no error, just a blank window
+over a server working perfectly. pywebview patches the same setting into the
+bundle's info dictionary at runtime, so this is a second lock on one door
+rather than the only one. And the bundle is signed ad-hoc, along with
 the bundled ffmpeg individually: `codesign --deep` signs nested *code*, and
 ffmpeg went in as a resource, so it is skipped. On Apple Silicon an unsigned
 Mach-O is not distrusted, it is killed on exec — the app would have launched
