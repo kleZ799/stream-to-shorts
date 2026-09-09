@@ -180,7 +180,7 @@ rendered file.
 
 ## Get it
 
-[**⬇ Download StreamToShorts.exe**](https://github.com/kleZ799/stream-to-shorts/releases/latest/download/StreamToShorts.exe) — 229 MB, Windows, self-contained.
+[**⬇ Download StreamToShorts.exe**](https://github.com/kleZ799/stream-to-shorts/releases/latest/download/StreamToShorts.exe) — 219 MB, Windows, self-contained.
 
 [**⬇ Download StreamToShorts-macOS-arm64.zip**](https://github.com/kleZ799/stream-to-shorts/releases/latest/download/StreamToShorts-macOS-arm64.zip) — 165 MB, Apple Silicon. **Beta.**
 
