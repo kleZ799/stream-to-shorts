@@ -504,12 +504,16 @@ class JobStore:
             if re.match(pattern, line):
                 # "[stack] 2/5: ..." gives exact render progress, and
                 # "[highlights] chunk 2/12" gives the same for a chunked
-                # rank. The rank pattern has to name "chunk": that stage
-                # also logs "(attempt 1/5)" while retrying a 503, and a
-                # bare N/M search would read a retry as progress and walk
-                # the bar backwards.
+                # rank. Both patterns are narrow on purpose. The rank one has
+                # to name "chunk": that stage also logs "(attempt 1/5)" while
+                # retrying a 503, and a bare N/M search would read a retry as
+                # progress and walk the bar backwards. The render one anchors
+                # on the "[tag] N/M:" that every clip-progress line is printed
+                # as, because that stage also reports a webcam found "from 4/6
+                # samples" -- and a bare search takes a detection score for a
+                # clip count.
                 if stage == "render":
-                    m = re.search(r"\b(\d+)\s*/\s*(\d+)\b", line)
+                    m = re.match(r"^\[[^\]]+\]\s+(\d+)\s*/\s*(\d+)\s*:", line)
                 elif stage == "rank":
                     m = re.search(r"\bchunk\s+(\d+)\s*/\s*(\d+)\b", line)
                 else:
