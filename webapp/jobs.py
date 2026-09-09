@@ -212,6 +212,10 @@ class Job:
     clips: List[Dict] = field(default_factory=list)
     highlights: List[Dict] = field(default_factory=list)
     video_meta: Dict = field(default_factory=dict)
+    # What the whole video is about, worked out once and reused for every
+    # title in the run -- see seo.detect_subject. Kept on the job so a rewrite
+    # months later files the clips under the same name as the original run.
+    subject: Dict = field(default_factory=dict)
     log: List[str] = field(default_factory=list)
     created_at: float = field(default_factory=time.time)
     # Where this job's clips actually live. Set for jobs read back from disk,
@@ -262,6 +266,7 @@ class Job:
             "source": self.source,
             "source_path": self.source_path,
             "video_meta": self.video_meta,
+            "subject": self.subject,
             "spec": self.spec.to_dict(),
             "clips": self.clips,
         }
@@ -463,6 +468,7 @@ class JobStore:
             source_path=source_path if source_path and os.path.exists(source_path) else None,
             clips=clips,
             video_meta=manifest.get("video_meta") or {},
+            subject=manifest.get("subject") or {},
             created_at=created,
             folder=str(folder),
             restored=True,
@@ -542,14 +548,17 @@ class JobStore:
                 self._queue.task_done()
 
     def _execute(self, job: Job) -> None:
+        from shorts_generator.boundaries import report as report_cuts
         from shorts_generator.highlights import get_highlights
+        from shorts_generator.hook_open import budget as hook_budget
         from shorts_generator.local.downloader import (
             download_youtube_local, fetch_video_meta,
         )
         from shorts_generator.local.llm import call_local_llm, reset_fallback
         from shorts_generator.local.transcriber import transcribe_local
         from shorts_generator.render import render_highlights
-        from shorts_generator.seo import attach_seo
+        from shorts_generator.seo import attach_seo, detect_subject
+        from shorts_generator.signals import analyse_audio
 
         # A previous run may have fallen back to OpenAI. Start this one on the
         # provider the user actually chose — its quota may well have reset.
@@ -598,7 +607,9 @@ class JobStore:
                 ]
                 all_highlights = list(top)
                 attach_seo(top, transcript=None, video_meta=job.video_meta,
-                           source=job.source, llm_fn=call_local_llm)
+                           source=job.source, llm_fn=call_local_llm,
+                           subject=detect_subject(job.video_meta, None,
+                                                  job.source, call_local_llm))
                 self._update(job, stage="render", frac=0.0,
                              message=_STAGE_LABELS["render"])
                 shorts = render_highlights(source_path, top, job.spec, out_dir=job.out_dir)
@@ -618,6 +629,15 @@ class JobStore:
                 )
 
             self._update(job, stage="rank", message=_STAGE_LABELS["rank"])
+            # What the transcript cannot say. Measured once for the whole
+            # source and reused for every candidate: it is what lets the rank
+            # hear a reaction, and what tells each clip where its own loudest
+            # moment is so the cold open can start there.
+            audio = analyse_audio(source_path, transcript.get("duration", 0))
+            # Room held back for that cold open, so a request for 30-second
+            # clips still produces 30-second files once it is on the front.
+            reserve = hook_budget(job.spec.hook_replay)
+
             # Beside the video, next to its .srt, so resuming works the same
             # way transcript reuse already does: point at the same source and
             # the work you already paid for is still there.
@@ -626,7 +646,9 @@ class JobStore:
                                     llm_fn=call_local_llm,
                                     checkpoint_path=checkpoint,
                                     clip_seconds=job.spec.clip_seconds,
-                                    brief=job.spec.brief)
+                                    brief=job.spec.brief,
+                                    audio=audio,
+                                    reserve_seconds=reserve)
             all_highlights = result.get("highlights", [])
             if not all_highlights:
                 raise RuntimeError("The ranker found no usable moments in this video.")
@@ -637,10 +659,21 @@ class JobStore:
                          reverse=True)[:job.spec.num_clips]
             print(f"[rank] {len(top)} clip(s) chosen, best first: "
                   + ", ".join(str(h.get("score", "?")) for h in top), flush=True)
+            # Every cut, with what moved it. A run's framing decisions are
+            # otherwise invisible until the clips are watched one by one.
+            report_cuts(top)
 
             self._update(job, frac=0.6, message="Writing titles, tags and hooks")
+            # Name the subject once for the whole batch. Every title, tag and
+            # hashtag in this run is then filed under the same thing, instead
+            # of ten clips inventing ten ways to say it.
+            subject = detect_subject(job.video_meta, transcript, job.source,
+                                     call_local_llm)
+            with self._lock:
+                job.subject = subject
+                job._version += 1
             attach_seo(top, transcript=transcript, video_meta=job.video_meta,
-                       source=job.source, llm_fn=call_local_llm)
+                       source=job.source, llm_fn=call_local_llm, subject=subject)
 
             self._update(job, stage="render", frac=0.0, message=_STAGE_LABELS["render"])
             shorts = render_highlights(source_path, top, job.spec, out_dir=job.out_dir)
@@ -698,6 +731,16 @@ class JobStore:
                 "hook_score": s.get("hook_score"),
                 "first_line": s.get("first_line"),
                 "virality_reason": s.get("virality_reason"),
+                # What this clip was actually chosen on. Kept per clip and
+                # written into the manifest so that the day real retention
+                # numbers exist, there is a record to correlate them against
+                # -- the ranking cannot be tuned against outcomes nobody
+                # wrote down.
+                "model_score": s.get("model_score"),
+                "signal_score": s.get("signal_score"),
+                "signals": s.get("signals"),
+                "boundary_notes": s.get("boundary_notes"),
+                "hook_replay_seconds": s.get("hook_replay_seconds"),
                 "seo": s.get("seo"),
                 "error": s.get("error"),
                 "job_id": job.id,
@@ -801,7 +844,7 @@ def regenerate_seo(store: "JobStore", job: Job, force: bool = False) -> int:
     errors: List[str] = []
     written = generate_seo(highlights, video_meta=job.video_meta,
                            source=job.source, llm_fn=call_local_llm,
-                           errors=errors)
+                           errors=errors, subject=job.subject or None)
 
     # Only keep what a model actually wrote, or fill a clip that had nothing at
     # all. Writing a fallback over metadata that was generated properly would
