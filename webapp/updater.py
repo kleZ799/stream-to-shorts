@@ -28,7 +28,10 @@ the strongest check available without a code-signing certificate.
 
 Only the one-file build can update itself. The one-folder build is hundreds of
 files, and swapping those under a running process is a different and far more
-fragile problem, so it is told to update by hand instead.
+fragile problem, so it is told to update by hand instead. The mac build is a
+.app -- a folder by another name, signed as one unit -- and is told the same.
+Checking still happens everywhere: knowing a new version exists is most of the
+value, and it is the half that cannot go wrong.
 """
 from __future__ import annotations
 
@@ -49,7 +52,12 @@ from typing import Optional
 from shorts_generator.version import APP_VERSION, UPDATE_REPO
 
 API_LATEST = f"https://api.github.com/repos/{UPDATE_REPO}/releases/latest"
-ASSET_NAME = "StreamToShorts.exe"
+
+# A release carries a build for each platform, so "is there a newer version"
+# has to be asked about the right one. Looking for the .exe on a Mac would
+# report every mac release as having nothing to offer.
+MAC = sys.platform == "darwin"
+ASSET_NAME = "StreamToShorts-macOS-arm64.zip" if MAC else "StreamToShorts.exe"
 
 # GitHub serves release downloads off its own domains and redirects between
 # them. Anything else means the API response was not what we think it was, so
@@ -95,6 +103,13 @@ def is_onefile() -> bool:
 
 
 def can_self_update() -> bool:
+    # A .app is a directory of hundreds of files signed as a single unit, and
+    # the rename trick below does not survive that: replace it piecemeal under
+    # a running process and the signature no longer matches its contents, so
+    # the app macOS refuses to launch next time is the one this was meant to
+    # install. Mac users are told a build exists and sent to fetch it.
+    if MAC:
+        return False
     return is_onefile()
 
 
@@ -248,14 +263,18 @@ def check() -> dict:
         state["status"] = "unavailable"
         if exe_path() is None:
             state["reason"] = "Running from source — update with git, not from here."
-        elif cmp > 0:
-            state["reason"] = (
-                f"Version {state['latest']} is out, but this is the one-folder "
-                f"build and it cannot replace itself. Download it instead.")
-        else:
+        elif cmp <= 0:
             state["reason"] = (
                 f"You are on {APP_VERSION}, which is newer than the latest "
                 f"release ({state['latest']}). Nothing to install.")
+        elif MAC:
+            state["reason"] = (
+                f"Version {state['latest']} is out. The mac app cannot replace "
+                f"itself — download it and drag it to Applications again.")
+        else:
+            state["reason"] = (
+                f"Version {state['latest']} is out, but this is the one-folder "
+                f"build and it cannot replace itself. Download it instead.")
         return state
 
     state["can_install"] = bool(state["_url"] and state["_digest"])
