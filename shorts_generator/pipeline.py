@@ -11,6 +11,7 @@ from typing import Dict, List, Optional
 from .clipper import crop_highlights
 from .downloader import download_youtube
 from .highlights import call_muapi_llm, get_highlights
+from .signals import analyse_audio
 from .transcriber import transcribe
 
 
@@ -34,7 +35,11 @@ def _run_local(
             "Whisper produced no segments. The video may have no detectable speech."
         )
 
-    highlights_result = get_highlights(transcript, num_clips=num_clips, llm_fn=call_local_llm)
+    # Measured hook signals need the audio itself, which only the local mode
+    # has on disk -- the API mode works from a hosted URL it never downloads.
+    audio = analyse_audio(source_path, transcript.get("duration", 0))
+    highlights_result = get_highlights(transcript, num_clips=num_clips,
+                                       llm_fn=call_local_llm, audio=audio)
     all_highlights: List[Dict] = highlights_result.get("highlights", [])
     if not all_highlights:
         raise RuntimeError("Highlight generator returned zero clips.")

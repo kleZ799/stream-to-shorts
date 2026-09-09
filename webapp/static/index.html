@@ -247,6 +247,10 @@
               <option value="ur">Urdu</option>
             </select>
           </label>
+          <label class="check"><input type="checkbox" id="hookReplay" checked><span>Start
+            each clip with its own loudest moment, then play it in full. Only
+            applies when the payoff lands late &mdash; clips that already open on
+            their hook are left alone.</span></label>
           <div class="budget hidden" id="budget">
             <div class="budget-track"><div class="budget-fill" id="budgetFill"></div></div>
             <span id="budgetText"></span>
@@ -501,10 +505,13 @@
 
       <div class="t-actions">
         <button class="btn ghost" id="seoRedo">Rewrite</button>
+        <button class="btn ghost" id="seoSave" disabled>Save changes</button>
         <button class="btn primary" id="seoCopyAll">Copy everything</button>
       </div>
       <p class="hint">Written from what is actually said in this clip, so the title
         never promises something the Short doesn't deliver.</p>
+      <p class="hint">Every box here is yours to rewrite. Saving keeps your wording and
+        renames the file on your PC to match the title.</p>
       <div id="seoMsg"></div>
     </div>
 

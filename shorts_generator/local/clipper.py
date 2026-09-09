@@ -13,6 +13,7 @@ from typing import Dict, List, Optional, Tuple
 
 from .. import proc
 from ..config import LOCAL_OUTPUT_DIR, LOCAL_OUTPUT_RESOLUTION
+from ..render import LOUDNESS_FILTER
 
 
 def _safe_remove(path: str, attempts: int = 5) -> None:
@@ -160,6 +161,7 @@ def _reframe_vertical(in_path: str, out_path: str, aspect_ratio: str,
         *scale_args,
         # OpenCV writes mpeg4; re-encode to h264 so the upload is accepted
         # everywhere (Shorts / Reels / TikTok) without a lossy server-side pass.
+        "-af", LOUDNESS_FILTER,
         "-c:v", "libx264", "-preset", "fast", "-crf", "20", "-pix_fmt", "yuv420p",
         "-c:a", "aac", "-b:a", "128k",
         "-map", "0:v:0", "-map", "1:a:0?",

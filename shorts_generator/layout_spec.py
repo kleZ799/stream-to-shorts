@@ -99,6 +99,11 @@ class LayoutSpec:
     # trim: cutting a clip to length afterwards would slice mid-sentence, so
     # the length has to be part of what it is asked to find.
     clip_seconds: Optional[List[float]] = None
+    # Open every clip with a second of its own loudest moment before playing
+    # it in full. Only does anything when the payoff is genuinely late in the
+    # clip -- see hook_open -- so leaving it on costs nothing on the clips
+    # that already open on their hook.
+    hook_replay: bool = True
     # What KIND of short to look for, in the user's own words — the angle, the
     # hook, the mood. Handed to the ranker verbatim; the renderer never reads
     # it. Kept whole rather than parsed, because the value is in the nuance a
@@ -191,6 +196,8 @@ class LayoutSpec:
         if self.clip_seconds:
             lo, hi = int(self.clip_seconds[0]), int(self.clip_seconds[1])
             prefix += f"{lo}-{hi}s each · "
+        if self.hook_replay:
+            prefix += "hook up front · "
         return prefix + self._describe_layout()
 
     def _describe_layout(self) -> str:
@@ -376,6 +383,20 @@ def _parse_keywords(prompt: str, spec: LayoutSpec) -> set:
         spec.notes.append(f"clip count → {spec.num_clips}")
         resolved.add("num_clips")
         p = p[:m.start()] + " " + p[m.end():]
+
+    # The cold open is on by default, so the only thing worth reading here is
+    # someone asking for it to stop. Both directions are matched anyway: a
+    # setting you can turn off in words and not back on again is a trap.
+    if re.search(r"\bno hook (repeat|replay|intro)\b|\bdon'?t repeat the hook\b"
+                 r"|\bwithout the hook (repeat|replay)\b|\bno cold open\b", p):
+        spec.hook_replay = False
+        spec.notes.append("hook replay → off, clips start straight in")
+        resolved.add("hook_replay")
+    elif re.search(r"\brepeat the hook\b|\bhook (first|up front|replay|loop)\b"
+                   r"|\bcold open\b|\btease the hook\b", p):
+        spec.hook_replay = True
+        spec.notes.append("hook replay → on, each clip opens on its own peak")
+        resolved.add("hook_replay")
 
     for pattern, value in _ASPECT_WORDS:
         if re.search(pattern, p):

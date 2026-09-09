@@ -12,6 +12,11 @@ from typing import Dict, List, Optional
 from . import proc
 from .layout_spec import LayoutSpec
 
+# Loudness target for every export. -14 LUFS is what YouTube, TikTok and
+# Instagram all normalise toward, so hitting it means nothing is turned down
+# on upload and nothing plays quiet next to whatever the feed shows first.
+LOUDNESS_FILTER = "loudnorm=I=-14:TP=-1.5:LRA=11"
+
 
 def _render_center_clip(source_path: str, start: float, end: float, out_path: str,
                         out_w: int, out_h: int) -> Dict:
@@ -45,6 +50,11 @@ def _render_center_clip(source_path: str, start: float, end: float, out_path: st
         "-ss", f"{start:.3f}", "-i", source_path, "-t", f"{end - start:.3f}",
         "-filter_complex", filt,
         "-map", "[v]", "-map", "0:a:0?",
+        # Every Short lands in a feed between two videos mastered by someone
+        # else. A clip that plays quieter than what came before it reads as
+        # lower production value before a word of it is heard, so the output
+        # is normalised to the same target the platforms mix to.
+        "-af", LOUDNESS_FILTER,
         "-c:v", "libx264", "-preset", "medium", "-crf", "23", "-pix_fmt", "yuv420p",
         "-c:a", "aac", "-b:a", "160k",
         "-movflags", "+faststart",
@@ -104,6 +114,34 @@ def render_highlights(
 
     print(f"[render] {spec.layout} · {spec.describe()} · {out_w}x{out_h}", flush=True)
 
+    results = _render_by_layout(source_path, highlights, spec, out_dir,
+                                out_w, out_h, name_prefix)
+    if spec.hook_replay:
+        _add_hook_openings(results)
+    return results
+
+
+def _add_hook_openings(results: List[Dict]) -> None:
+    """Give each rendered clip a cold open on its own loudest moment.
+
+    Done after rendering rather than inside each renderer, so all three
+    layouts get it from one place and none of them has to know it exists. It
+    no-ops on any clip whose hook is already at the front.
+    """
+    from .hook_open import apply
+
+    for r in results:
+        path = r.get("clip_url")
+        if not path or not os.path.exists(path):
+            continue
+        added = apply(path, r)
+        if added:
+            r["hook_replay_seconds"] = round(added, 2)
+
+
+def _render_by_layout(source_path: str, highlights: List[Dict], spec: LayoutSpec,
+                      out_dir: str, out_w: int, out_h: int,
+                      name_prefix: str) -> List[Dict]:
     if spec.layout == "stacked":
         from .local.gaming_layout import render_stacked_highlights
         return render_stacked_highlights(

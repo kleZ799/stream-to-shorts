@@ -28,6 +28,7 @@ from typing import Dict, List, Optional, Tuple
 
 from .. import proc
 from ..config import LOCAL_OUTPUT_DIR
+from ..render import LOUDNESS_FILTER
 
 # Fraction of the output height given to the webcam panel.
 CAM_PANEL_FRACTION = 0.42
@@ -184,6 +185,7 @@ def render_stacked_clip(
         "-ss", f"{start:.3f}", "-i", source_path, "-t", f"{end - start:.3f}",
         "-filter_complex", filt,
         "-map", "[v]", "-map", "0:a:0?",
+        "-af", LOUDNESS_FILTER,
         "-c:v", "libx264", "-preset", "medium", "-crf", "23", "-pix_fmt", "yuv420p",
         "-c:a", "aac", "-b:a", "160k",
         "-movflags", "+faststart",
