@@ -51,6 +51,10 @@ bin/
 *.exe
 *.dll
 *.pyd
+*.app/
+# rendered from assets/icon.png at build time, and only on a Mac — committing
+# it would leave a third copy of the artwork for someone to forget to redraw
+assets/icon.icns
 
 # local tooling — not part of the project
 # (.claude/skills is tracked on purpose, so only the launch config is ignored)
