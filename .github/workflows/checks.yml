@@ -92,3 +92,35 @@ jobs:
               sys.exit(1)
           print("all accounted for")
           PY
+
+      # The updater finds a release by asset filename, and the release workflow
+      # decides what that filename is. Rename one without the other and nothing
+      # breaks loudly -- the app just reports every release as empty and goes
+      # quiet about updates, which is the failure you find out about from a
+      # user months later.
+      - name: The updater looks for the files the release actually publishes
+        run: |
+          python - <<'PY'
+          import re, sys, pathlib
+          updater = pathlib.Path("webapp/updater.py").read_text(encoding="utf-8")
+          release = pathlib.Path(".github/workflows/release.yml").read_text(encoding="utf-8")
+
+          # Filenames only. The module also builds a "StreamToShorts/<version>"
+          # user agent, which is not something a release attaches.
+          asset = r"StreamToShorts[\w.\-]*\.(?:exe|zip)"
+          wanted = set(re.findall(f'"({asset})"', updater))
+          published = set(re.findall(f"({asset})", release))
+
+          if not wanted:
+              print("::error::updater.py names no release asset at all")
+              sys.exit(1)
+
+          print("updater looks for :", ", ".join(sorted(wanted)))
+          print("release publishes :", ", ".join(sorted(published)))
+
+          missing = wanted - published
+          if missing:
+              print(f"::error::updater.py expects {sorted(missing)}, which the release workflow never uploads")
+              sys.exit(1)
+          print("every asset the updater asks for is one the release attaches")
+          PY
