@@ -143,11 +143,26 @@ def render_stacked_clip(
     corner: str = "bottom-left",
     cam_panel_fraction: float = CAM_PANEL_FRACTION,
     face_context_multiple: float = FACE_CONTEXT_MULTIPLE,
+    log_label: str = "",
 ) -> Dict:
     """Cut [start, end] and render it as webcam-over-gameplay in one ffmpeg pass."""
     src_w, src_h = _probe_dimensions(source_path)
     cam = locate_webcam(source_path, start, end, corner=corner,
                         face_context_multiple=face_context_multiple)
+
+    # Said here, before the encode, rather than after it. Whether the webcam
+    # was found decides which of the two layouts below gets rendered, and that
+    # is exactly the thing worth knowing when the render then fails. Reported
+    # on the way out it vanishes precisely when it matters, leaving a log whose
+    # plan line promises a stacked layout above a command that centre-crops.
+    if log_label:
+        print(
+            f"{log_label} webcam "
+            + (f"{cam['w']}x{cam['h']} at ({cam['x']},{cam['y']}) "
+               f"from {cam['detections']}/{SAMPLE_COUNT} samples"
+               if cam else "NOT FOUND — using a centre crop"),
+            flush=True,
+        )
 
     cam_h = int(out_h * cam_panel_fraction)
     cam_h -= cam_h % 2
@@ -218,14 +233,7 @@ def render_stacked_highlights(
                 corner=corner, out_w=out_w, out_h=out_h,
                 cam_panel_fraction=cam_panel_fraction,
                 face_context_multiple=face_context_multiple,
-            )
-            cam = info["cam"]
-            print(
-                f"[stack] {i} webcam "
-                + (f"{cam['w']}x{cam['h']} at ({cam['x']},{cam['y']}) "
-                   f"from {cam['detections']}/{SAMPLE_COUNT} samples"
-                   if cam else "NOT FOUND — used centre crop"),
-                flush=True,
+                log_label=f"[stack] {i}",
             )
             results.append({**h, "clip_url": out_path, "layout": info})
         except Exception as e:
