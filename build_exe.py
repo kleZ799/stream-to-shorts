@@ -155,7 +155,13 @@ def _finish_bundle(app: Path) -> int:
         for path in app.rglob(name):
             if path.is_file() and not path.is_symlink():
                 path.chmod(path.stat().st_mode | 0o111)
-                print(f"  +x {path.relative_to(app)}")
+                # Signed one at a time, because --deep below signs nested
+                # *code* and ffmpeg arrived here as a resource. It is a real
+                # Mach-O binary either way, and on Apple Silicon an unsigned
+                # one does not run.
+                subprocess.run(["codesign", "--force", "--sign", "-", str(path)],
+                               stdout=subprocess.DEVNULL)
+                print(f"  +x, signed  {path.relative_to(app)}")
 
     print("signing the bundle (ad-hoc)...")
     signed = subprocess.run(
