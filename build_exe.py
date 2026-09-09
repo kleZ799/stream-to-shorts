@@ -1,16 +1,19 @@
-"""Build StreamToShorts.exe with PyInstaller.
+"""Build the Stream to Shorts app with PyInstaller.
 
     pip install -r requirements-web.txt pyinstaller
     python build_exe.py
 
-Output lands in dist/. Pass --onefile for a single .exe (slower to start,
-since it unpacks to a temp dir each launch); the default one-folder build
-starts faster and is what you'd zip for a release.
+Output lands in dist/. On Windows that is a StreamToShorts folder, or a single
+StreamToShorts.exe with --onefile (slower to start, since it unpacks to a temp
+dir each launch, but the only build that can replace itself when an update
+arrives). On macOS it is StreamToShorts.app, a bundle you drag to Applications.
 
-Optional: drop ffmpeg.exe and ffprobe.exe into a ./bin folder before
-building and they get bundled, so users don't have to install ffmpeg
-themselves. Without them the app still builds and tells the user what's
-missing at startup.
+PyInstaller cannot cross-compile: a Windows build has to be made on Windows and
+a mac build on a Mac. The release workflow runs one of each.
+
+Optional: drop ffmpeg and ffprobe into a ./bin folder before building and they
+get bundled, so users don't have to install ffmpeg themselves. Without them the
+app still builds and tells the user what's missing at startup.
 """
 import argparse
 import os
@@ -19,9 +22,17 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from typing import Optional
 
 ROOT = Path(__file__).parent.resolve()
 NAME = "StreamToShorts"
+
+MAC = sys.platform == "darwin"
+
+# Reverse-DNS, because macOS identifies an app by this rather than by its name.
+# Two apps sharing one identifier confuse everything from window restoration to
+# the keychain, so it is spelled out rather than left to PyInstaller's default.
+BUNDLE_ID = "com.github.klez799.streamtoshorts"
 
 
 def _sep() -> str:
@@ -49,6 +60,112 @@ def _check_version_agreement() -> None:
     print(f"version {APP_VERSION} — version_info.txt agrees")
 
 
+# --- macOS ----------------------------------------------------------------
+
+def _mac_icon() -> Optional[Path]:
+    """An .icns for the bundle, rendered from assets/icon.png.
+
+    macOS will not read a .ico, so the icon Windows uses is no help here. Both
+    sips and iconutil ship with macOS, so this needs nothing installed -- and
+    generating the file beats committing a third copy of the same artwork and
+    hoping whoever redraws it remembers all three.
+    """
+    icns = ROOT / "assets" / "icon.icns"
+    png = ROOT / "assets" / "icon.png"
+    if icns.exists():
+        return icns
+    if not png.exists():
+        return None
+
+    iconset = ROOT / "build" / "icon.iconset"
+    shutil.rmtree(iconset, ignore_errors=True)
+    iconset.mkdir(parents=True, exist_ok=True)
+    try:
+        for size in (16, 32, 128, 256, 512):
+            for scale in (1, 2):
+                px = size * scale
+                out = iconset / (f"icon_{size}x{size}.png" if scale == 1
+                                 else f"icon_{size}x{size}@2x.png")
+                subprocess.run(["sips", "-z", str(px), str(px), str(png),
+                                "--out", str(out)],
+                               check=True, stdout=subprocess.DEVNULL,
+                               stderr=subprocess.DEVNULL)
+        subprocess.run(["iconutil", "-c", "icns", str(iconset), "-o", str(icns)],
+                       check=True)
+    except (subprocess.CalledProcessError, FileNotFoundError) as e:
+        print(f"could not build an .icns ({e}) — the app will use a blank icon")
+        return None
+    finally:
+        shutil.rmtree(iconset, ignore_errors=True)
+
+    print(f"rendered {icns.name} from {png.name}")
+    return icns
+
+
+def _stamp_bundle(app: Path) -> None:
+    """Write the version and the app's real name into Info.plist.
+
+    PyInstaller has a flag for neither, so a bundle otherwise calls itself
+    0.0.0 -- which is what Finder's Get Info shows, and what the release
+    workflow reads to check that the build it is about to publish really is the
+    version its tag claims. This is version_info.txt's opposite number.
+    """
+    import plistlib
+
+    sys.path.insert(0, str(ROOT))
+    from shorts_generator.version import APP_VERSION
+
+    plist = app / "Contents" / "Info.plist"
+    data = plistlib.loads(plist.read_bytes())
+    data["CFBundleShortVersionString"] = APP_VERSION
+    data["CFBundleVersion"] = APP_VERSION
+    data["CFBundleDisplayName"] = "Stream to Shorts"
+    data["NSHumanReadableCopyright"] = (
+        "MIT licence. Source: github.com/klez799/stream-to-shorts")
+
+    # The window is a view onto a server this app runs itself, on 127.0.0.1
+    # over plain http. App Transport Security blocks that by default, and the
+    # symptom is not an error -- it is a window that comes up blank while
+    # everything behind it works perfectly.
+    ats = data.setdefault("NSAppTransportSecurity", {})
+    ats["NSAllowsLocalNetworking"] = True
+
+    plist.write_bytes(plistlib.dumps(data))
+    print(f"stamped {APP_VERSION} into Info.plist")
+
+
+def _finish_bundle(app: Path) -> int:
+    """Make the bundled tools executable, then sign the bundle.
+
+    Two things macOS insists on and Windows never asked for.
+
+    ffmpeg arrives as a data file, and a data file has no execute bit -- so the
+    app would build, ship, launch, and only then fail on the first clip with
+    "permission denied", which is a long way to travel to find that out.
+
+    And on Apple Silicon every executable must carry a signature. An unsigned
+    binary there is not merely untrusted, it is killed on exec. There is no
+    certificate here, so it is signed ad-hoc: enough to run, not enough to say
+    who wrote it. Gatekeeper still has its say on first launch.
+
+    Signing goes last, because a signature covers the bundle's contents. Touch
+    anything afterwards and it no longer matches.
+    """
+    for name in ("ffmpeg", "ffprobe"):
+        for path in app.rglob(name):
+            if path.is_file() and not path.is_symlink():
+                path.chmod(path.stat().st_mode | 0o111)
+                print(f"  +x {path.relative_to(app)}")
+
+    print("signing the bundle (ad-hoc)...")
+    signed = subprocess.run(
+        ["codesign", "--force", "--deep", "--sign", "-", str(app)])
+    if signed.returncode != 0:
+        print("codesign failed — this bundle will not launch on Apple Silicon",
+              file=sys.stderr)
+    return signed.returncode
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Build the Stream to Shorts executable")
     ap.add_argument("--onefile", action="store_true",
@@ -60,6 +177,14 @@ def main() -> int:
                     help="Leave the CUDA runtime out. Default for --onefile.")
     args = ap.parse_args()
 
+    if MAC and args.onefile:
+        raise SystemExit(
+            "--onefile is a Windows shape. A mac release ships StreamToShorts.app, "
+            "a bundle, and one file buys nothing here: the mac build does not "
+            "replace itself, so the only thing it would add is unpacking 200 MB "
+            "on every launch. Build without --onefile."
+        )
+
     # The two builds want opposite answers here, so the default depends on
     # which one is being made -- and saying it out loud beats letting them
     # drift apart by accident.
@@ -70,6 +195,13 @@ def main() -> int:
     # by every user on every run -- including the majority with no NVIDIA card
     # who cannot use it at all.
     use_cuda = (not args.onefile) if args.cuda is None else args.cuda
+    if MAC and use_cuda:
+        # No Mac has an NVIDIA card. Asking for CUDA here is not worth stopping
+        # for, but quietly building something 2GB heavier that cannot work
+        # would be.
+        use_cuda = False
+        if args.cuda:
+            print("ignoring --cuda: no Mac has an NVIDIA card to run it on")
 
     # The updater compares the running build's APP_VERSION against the newest
     # release tag. If the version resource says one thing and APP_VERSION says
@@ -104,9 +236,6 @@ def main() -> int:
         # The native window. pywebview picks its backend at runtime, so
         # PyInstaller sees none of it without being told.
         "--hidden-import", "webview",
-        "--hidden-import", "webview.platforms.edgechromium",
-        "--hidden-import", "webview.platforms.winforms",
-        "--hidden-import", "clr",
         "--collect-all", "webview",
 
         # Imported lazily inside functions, so PyInstaller can't see them.
@@ -137,6 +266,25 @@ def main() -> int:
         str(ROOT / "desktop.py"),
     ]
 
+    # pywebview's backends are per-platform, and each drags in bindings the
+    # other platform does not have. Naming the Windows ones on a Mac asks
+    # PyInstaller to go and find pythonnet, which is not there and never
+    # will be.
+    if MAC:
+        platform_args = [
+            "--hidden-import", "webview.platforms.cocoa",
+            "--hidden-import", "objc",
+            "--collect-all", "objc",
+            "--osx-bundle-identifier", BUNDLE_ID,
+        ]
+    else:
+        platform_args = [
+            "--hidden-import", "webview.platforms.edgechromium",
+            "--hidden-import", "webview.platforms.winforms",
+            "--hidden-import", "clr",
+        ]
+    cmd[-1:-1] = platform_args
+
     bin_dir = ROOT / "bin"
     if bin_dir.is_dir() and any(bin_dir.iterdir()):
         cmd[-1:-1] = ["--add-data", f"{bin_dir}{sep}bin"]
@@ -153,17 +301,24 @@ def main() -> int:
     else:
         print("leaving the CUDA runtime out — transcription will run on the CPU")
 
-    # Author and copyright, compiled into the exe's version resource. This is
-    # what Properties -> Details shows, so a copy that has travelled away from
-    # this repo still says who wrote it and under what licence.
-    version_file = ROOT / "version_info.txt"
-    if version_file.exists():
-        cmd[-1:-1] = ["--version-file", str(version_file)]
+    if MAC:
+        icon = _mac_icon()
     else:
-        print("no version_info.txt — the exe will ship with no author metadata")
+        # Author and copyright, compiled into the exe's version resource. This
+        # is what Properties -> Details shows, so a copy that has travelled
+        # away from this repo still says who wrote it and under what licence.
+        # The format is a Windows resource; the mac equivalent is Info.plist,
+        # written after the build instead.
+        version_file = ROOT / "version_info.txt"
+        if version_file.exists():
+            cmd[-1:-1] = ["--version-file", str(version_file)]
+        else:
+            print("no version_info.txt — the exe will ship with no author metadata")
 
-    icon = ROOT / "assets" / "icon.ico"
-    if icon.exists():
+        ico = ROOT / "assets" / "icon.ico"
+        icon = ico if ico.exists() else None
+
+    if icon is not None:
         cmd[-1:-1] = ["--icon", str(icon)]
 
     print("running PyInstaller...\n")
@@ -171,11 +326,24 @@ def main() -> int:
     if result.returncode != 0:
         return result.returncode
 
-    out = ROOT / "dist" / (f"{NAME}.exe" if args.onefile else NAME)
+    if MAC:
+        out = ROOT / "dist" / f"{NAME}.app"
+        if not out.is_dir():
+            print(f"\nthe build produced no {out.name}", file=sys.stderr)
+            return 1
+        _stamp_bundle(out)
+        rc = _finish_bundle(out)
+        if rc != 0:
+            return rc
+    else:
+        out = ROOT / "dist" / (f"{NAME}.exe" if args.onefile else NAME)
+
     print(f"\nBuilt: {out}")
     if out.exists() and out.is_dir():
-        size = sum(f.stat().st_size for f in out.rglob("*") if f.is_file())
-        print(f"Folder size: {size / 1e6:.0f} MB — zip this for a release.")
+        size = sum(f.stat().st_size for f in out.rglob("*")
+                   if f.is_file() and not f.is_symlink())
+        noun = "Bundle" if MAC else "Folder"
+        print(f"{noun} size: {size / 1e6:.0f} MB — zip this for a release.")
     elif out.exists():
         print(f"Size: {out.stat().st_size / 1e6:.0f} MB")
     return 0
