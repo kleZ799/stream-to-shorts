@@ -45,7 +45,7 @@ def _render_center_clip(source_path: str, start: float, end: float, out_path: st
         f"[0:v]crop={crop_w}:{crop_h}:{x}:{y},"
         f"scale={out_w}:{out_h}:flags=lanczos,setsar=1[v]"
     )
-    proc.run([
+    proc.run_checked([
         "ffmpeg", "-y", "-loglevel", "error",
         "-ss", f"{start:.3f}", "-i", source_path, "-t", f"{end - start:.3f}",
         "-filter_complex", filt,
@@ -59,7 +59,7 @@ def _render_center_clip(source_path: str, start: float, end: float, out_path: st
         "-c:a", "aac", "-b:a", "160k",
         "-movflags", "+faststart",
         out_path,
-    ], check=True)
+    ], what="ffmpeg (centre crop render)")
     return {"crop": {"x": x, "y": y, "w": crop_w, "h": crop_h}}
 
 

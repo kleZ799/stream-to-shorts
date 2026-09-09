@@ -77,10 +77,10 @@ def _window(highlight: Dict, clip_length: float) -> Optional[tuple]:
 
 def _duration(path: str) -> float:
     try:
-        out = proc.run(
+        out = proc.run_checked(
             ["ffprobe", "-v", "error", "-show_entries", "format=duration",
              "-of", "csv=p=0", path],
-            capture_output=True, text=True, check=True,
+            what="ffprobe (clip duration)", capture_stdout=True,
         ).stdout
         return float((out or "0").strip())
     except Exception:
@@ -132,7 +132,7 @@ def apply(clip_path: str, highlight: Dict) -> Optional[float]:
         tmp,
     ]
     try:
-        proc.run(cmd, check=True)
+        proc.run_checked(cmd, what="ffmpeg (cold open)")
         os.replace(tmp, clip_path)
     except Exception as e:
         print(f"[hook] could not add the cold open ({e}) — keeping the plain cut",

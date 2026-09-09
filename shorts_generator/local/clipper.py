@@ -56,7 +56,7 @@ def _cut_subclip(source_path: str, start: float, end: float, out_path: str) -> s
         "-c:a", "aac", "-b:a", "128k",
         out_path,
     ]
-    proc.run(cmd, check=True)
+    proc.run_checked(cmd, what="ffmpeg (cut subclip)")
     return out_path
 
 
@@ -168,7 +168,7 @@ def _reframe_vertical(in_path: str, out_path: str, aspect_ratio: str,
         "-shortest",
         out_path,
     ]
-    proc.run(cmd, check=True)
+    proc.run_checked(cmd, what="ffmpeg (vertical reframe)")
     _safe_remove(silent_path)
     return out_path
 

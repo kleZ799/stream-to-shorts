@@ -21,6 +21,7 @@ request, and blocks the worker before it starts another.
 from __future__ import annotations
 
 import ctypes
+import errno
 import os
 import signal
 import subprocess
@@ -207,6 +208,96 @@ def run(cmd, *, check: bool = False, capture_output: bool = False,
     if check and proc.returncode != 0:
         raise subprocess.CalledProcessError(proc.returncode, cmd, out, err)
     return result
+
+
+# --- failing children -----------------------------------------------------
+
+# ffmpeg does not exit with 1. It exits with its own AVERROR code, a negative
+# number that Windows reports back as unsigned 32-bit -- which is how a failed
+# render comes to be logged as "exit status 3752568763". Those four bytes are
+# ASCII: 3752568763 is -MKTAG('E','X','T',' '), AVERROR_EXTERNAL. Nobody
+# reading a bug report should have to do that arithmetic by hand.
+_AVERROR_TAGS = {
+    "BUG!": ("AVERROR_BUG", "an internal ffmpeg bug"),
+    "BUG ": ("AVERROR_BUG2", "an internal ffmpeg bug"),
+    "BUFS": ("AVERROR_BUFFER_TOO_SMALL", "a buffer was too small"),
+    "EOF ": ("AVERROR_EOF", "the input ended earlier than expected"),
+    "EXIT": ("AVERROR_EXIT", "ffmpeg was asked to stop"),
+    "EXT ": ("AVERROR_EXTERNAL",
+             "a library ffmpeg calls failed -- in an encode, that is libx264"),
+    "INDA": ("AVERROR_INVALIDDATA", "invalid data in the input file"),
+    "PAWE": ("AVERROR_PATCHWELCOME", "ffmpeg does not implement what was asked for"),
+    "UNKN": ("AVERROR_UNKNOWN", "an unknown error"),
+}
+
+# The same family, for the codes whose first byte is 0xF8 rather than a letter.
+_AVERROR_MISSING = {
+    "BSF": "a bitstream filter", "DEC": "a decoder", "DEM": "a demuxer",
+    "ENC": "an encoder", "FIL": "a filter", "MUX": "a muxer",
+    "OPT": "an option", "PRO": "a protocol", "STR": "a stream",
+}
+
+
+def explain_exit_status(code: Optional[int]) -> str:
+    """Turn an ffmpeg exit code into a sentence, or "" if it is not one."""
+    if code is None or 0 <= code < 256:
+        return ""                       # an ordinary small exit code
+    signed = code - (1 << 32) if code > 0x7FFFFFFF else code
+    n = -signed
+    if not 0 < n < (1 << 32):
+        return ""
+
+    if n < 256:                         # AVERROR(errno)
+        name = errno.errorcode.get(n, str(n))
+        return f"exit status {code} is AVERROR({name}): {os.strerror(n)}"
+
+    raw = bytes(((n >> shift) & 0xFF for shift in (0, 8, 16, 24)))
+    if raw[0] == 0xF8:
+        missing = _AVERROR_MISSING.get(raw[1:].decode("latin-1"))
+        return (f"exit status {code} is ffmpeg reporting that it could not "
+                f"find {missing}") if missing else ""
+    try:
+        tag = raw.decode("ascii")
+    except UnicodeDecodeError:
+        return ""
+    known = _AVERROR_TAGS.get(tag)
+    if not known:
+        return ""
+    name, meaning = known
+    return f"exit status {code} is ffmpeg's {name}: {meaning}"
+
+
+def run_checked(cmd, *, what: str = "ffmpeg", capture_stdout: bool = False,
+                tail: int = 12) -> subprocess.CompletedProcess:
+    """Run a child that has to succeed, and if it does not, say why.
+
+    check=True raises CalledProcessError, whose message is the command and a
+    number -- and the number is the AVERROR above, which reads as noise. The
+    actual reason was printed to stderr, and there it dies: a windowed build
+    has no console, so the one line explaining the failure is written to a
+    handle that goes nowhere. Every render failure then looks identical from
+    the outside, which is no use to anyone reporting one.
+
+    So stderr is captured and put in the exception instead. -loglevel error
+    means there are a handful of lines at most, and communicate() drains the
+    pipe, so nothing here can fill a buffer and stall a long encode.
+    """
+    kwargs = {"stderr": subprocess.PIPE, "text": True}
+    if capture_stdout:
+        kwargs["stdout"] = subprocess.PIPE
+
+    result = run(cmd, **kwargs)
+    if result.returncode == 0:
+        return result
+
+    said = [line for line in (result.stderr or "").splitlines() if line.strip()]
+    parts = ["\n".join(said[-tail:])] if said else []
+    hint = explain_exit_status(result.returncode)
+    if hint:
+        parts.append(f"({hint})")
+    if not parts:
+        parts.append(f"it exited with status {result.returncode} and said nothing")
+    raise RuntimeError(f"{what} failed: " + "\n".join(parts))
 
 
 def popen(cmd, **kwargs) -> subprocess.Popen:

@@ -48,10 +48,10 @@ SAMPLE_COUNT = 6
 
 
 def _probe_dimensions(source_path: str) -> Tuple[int, int]:
-    out = proc.run(
+    out = proc.run_checked(
         ["ffprobe", "-v", "error", "-select_streams", "v:0",
          "-show_entries", "stream=width,height", "-of", "csv=p=0:s=x", source_path],
-        capture_output=True, text=True, check=True,
+        what="ffprobe (source dimensions)", capture_stdout=True,
     ).stdout.strip()
     w, h = out.split("x")[:2]
     return int(w), int(h)
@@ -67,10 +67,10 @@ def _detect_face(source_path: str, timestamp: float, src_w: int, src_h: int,
     )
     with tempfile.TemporaryDirectory() as d:
         frame_path = os.path.join(d, "f.png")
-        proc.run(
+        proc.run_checked(
             ["ffmpeg", "-y", "-loglevel", "error", "-ss", f"{timestamp:.3f}",
              "-i", source_path, "-frames:v", "1", frame_path],
-            check=True,
+            what="ffmpeg (webcam sample frame)",
         )
         img = cv2.imread(frame_path)
     if img is None:
@@ -191,7 +191,7 @@ def render_stacked_clip(
         "-movflags", "+faststart",
         out_path,
     ]
-    proc.run(cmd, check=True)
+    proc.run_checked(cmd, what="ffmpeg (stacked render)")
     return {"cam": cam, "game_x": game_x, "cam_panel_h": cam_h}
 
 
