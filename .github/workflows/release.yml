@@ -279,9 +279,11 @@ jobs:
       - name: Summary
         run: |
           {
-            echo "### macOS build"
+            echo "### macOS build (beta)"
             echo ""
             echo "- \`StreamToShorts-macOS-arm64.zip\` — SHA-256 \`$SHA256\`"
+            echo "- **Never run on a Mac.** Everything above is what a runner could"
+            echo "  check; nobody has opened it. Say so in the release notes."
             echo "- Apple Silicon only, and signed ad-hoc rather than notarised —"
             echo "  first launch needs System Settings → Privacy & Security → Open Anyway."
             echo "- The mac app checks for updates but does not install them."

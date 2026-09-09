@@ -22,3 +22,8 @@ git push origin v1.6.0
 
 The workflow builds the exe on a GitHub runner and publishes the release.
 Every installed copy from v1.5.0 onward will offer it to its user.
+
+It also builds `StreamToShorts-macOS-arm64.zip` on a macOS runner. **Say in the
+notes that the mac build is a beta and has not been run on a Mac** — it is
+built and checked by CI, and that is all. Someone downloading it should know
+that before they do, not after.
