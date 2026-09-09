@@ -1,7 +1,11 @@
 /* Stream to Shorts — YouTube's shell, one shade sharper.
-   Surfaces, spacing and motion follow youtube.com's dark theme so the app
-   feels like a place the user has already been; the neon accents and depth
-   are ours. */
+   Surfaces, spacing and motion follow youtube.com so the app feels like a
+   place the user has already been; the neon accents and depth are ours.
+
+   Two themes, one set of names. Everything below is a token, and the light
+   theme at the bottom of this block redefines the tokens rather than
+   restating any rule — so a colour added to a rule further down works in
+   both themes, or in neither, and cannot work in only one by accident. */
 
 :root {
   /* YouTube dark surfaces */
@@ -9,10 +13,48 @@
   --raised:    #181818;
   --raised-2:  #212121;
   --hover:     #272727;
+  --hover-2:   #3a3a3a;
   --line:      #303030;
+  --edge:      #454545;
   --text:      #f1f1f1;
   --text-2:    #aaaaaa;
   --text-3:    #717171;
+
+  /* surfaces that sit *below* the page rather than above it */
+  --sunken:    #121212;
+  --sunken-2:  #0c0c0c;
+  --field:     #0f0f0f;
+  --console:   #0a0a0a;
+  --console-ink: #9aa4b2;
+
+  /* Whatever sits on top of the background. Every faint overlay in this file
+     is rgba(var(--fg-rgb), a), so the light theme flips all twenty of them by
+     changing this one line — and the alphas, which are what the dark theme was
+     tuned with, never move. */
+  --fg-rgb:    255, 255, 255;
+  --glass-rgb: 8, 8, 8;
+
+  --mast-bg:   rgba(15, 15, 15, .82);
+
+  --scroll:    #4d4d4d;
+  --scroll-h:  #6b6b6b;
+
+  /* Ink for the chrome drawn ON a video: the duration pill, the rank badge,
+     the flags. Those sit on black in both themes, because a video frame is
+     black whatever the page around it is doing — so this is one of the few
+     things here the light theme must NOT flip. It is spelled out rather than
+     left as var(--text) precisely so it cannot be flipped by accident. */
+  --on-media:      #f1f1f1;
+  --on-media-2:    #c9c9c9;
+  --on-media-warn: #ffd24d;
+  --on-media-fill: rgba(255, 255, 255, .12);
+  --on-media-fill-hover: rgba(255, 255, 255, .22);
+
+  /* striped placeholders: the empty 9:16 frame, and the waveform track */
+  --ghost-a:   #1a1a1a;
+  --ghost-b:   #202020;
+  --wave-a:    #1c1c1c;
+  --wave-b:    #232323;
 
   /* accents */
   --red:       #ff0033;
@@ -21,6 +63,18 @@
   --ok:        #2ba640;
   --warn:      #ffd24d;
   --err:       #ff5c5c;
+
+  /* Ink for the message boxes, which are pale text on a wash of the same
+     hue. Kept apart from the accent above because on a white page the wash
+     stays pale and the text has to go dark, not the other way about. */
+  --err-ink:   #ff8b8b;
+  --ok-ink:    #8fe0a0;
+  --warn-ink:  #ffe0a0;
+  --blue-ink:  #a9d8ff;
+
+  /* how strong the aurora behind the page is */
+  --aurora-red:  .13;
+  --aurora-blue: .10;
 
   --r-sm: 8px;
   --r:    12px;
@@ -34,6 +88,68 @@
   --ease: cubic-bezier(.2, .8, .25, 1);
   --fast: .16s var(--ease);
   --med:  .28s var(--ease);
+}
+
+/* ---------------------------------------------------------------- light --
+   Set by app.js on <html> before the first paint, so there is no flash of
+   the wrong theme. Nothing here is a rule: it is the same tokens, holding
+   different values.
+
+   The accents move as well as the surfaces. #3ea6ff and #ffd24d were picked
+   to glow on near-black and are close to invisible on white — a colour that
+   reads as "warning" on one theme and as "nothing at all" on the other is
+   not one colour, it is a bug that only some users see. */
+:root[data-theme="light"] {
+  --bg:        #ffffff;
+  --raised:    #f9f9f9;
+  --raised-2:  #f2f2f2;
+  --hover:     #e8e8e8;
+  --hover-2:   #dcdcdc;
+  --line:      #e0e0e0;
+  --edge:      #c4c4c4;
+  --text:      #0f0f0f;
+  --text-2:    #606060;
+  /* Darker than the dark theme's #717171 looks like it should need to be.
+     Grey on white is harder to read than the same grey on black, and #8b8b8b
+     — which looked right next to the other tokens — measured 3.4:1 against
+     the page, under the 4.5 floor for body text. */
+  --text-3:    #6b6b6b;
+
+  --sunken:    #f5f5f5;
+  --sunken-2:  #ececec;
+  --field:     #ffffff;
+  --console:   #f6f7f9;
+  --console-ink: #4a5261;
+
+  --fg-rgb:    0, 0, 0;
+  --glass-rgb: 255, 255, 255;
+
+  --scroll:    #c4c4c4;
+  --scroll-h:  #a0a0a0;
+
+  --ghost-a:   #e4e4e4;
+  --ghost-b:   #dadada;
+  --wave-a:    #eaeaea;
+  --wave-b:    #dedede;
+
+  --mast-bg:   rgba(255, 255, 255, .85);
+
+  /* The brand red, one notch down: #ff0033 on white is under the contrast
+     floor for text, and this red is used as text as well as as a fill. */
+  --red:       #e60028;
+  --red-deep:  #b3001f;
+  --blue:      #065fd4;
+  --ok:        #1a7f37;
+  --warn:      #8a6a00;
+  --err:       #c62828;
+
+  --err-ink:   #a01919;
+  --ok-ink:    #14622a;
+  --warn-ink:  #6f5400;
+  --blue-ink:  #0b4ea8;
+
+  --aurora-red:  .07;
+  --aurora-blue: .06;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -59,8 +175,8 @@ body::before {
   pointer-events: none;
   z-index: 0;
   background:
-    radial-gradient(60% 60% at 15% 0%, rgba(255, 0, 51, .13), transparent 70%),
-    radial-gradient(55% 55% at 85% 5%, rgba(62, 166, 255, .10), transparent 70%);
+    radial-gradient(60% 60% at 15% 0%, rgba(255, 0, 51, var(--aurora-red)), transparent 70%),
+    radial-gradient(55% 55% at 85% 5%, rgba(62, 166, 255, var(--aurora-blue)), transparent 70%);
   animation: drift 22s var(--ease) infinite alternate;
 }
 
@@ -77,10 +193,10 @@ svg { width: 24px; height: 24px; display: block; flex: 0 0 auto; }
 ::selection { background: rgba(255, 0, 51, .32); }
 
 /* scrollbars, YouTube-thin */
-* { scrollbar-width: thin; scrollbar-color: #4d4d4d transparent; }
+* { scrollbar-width: thin; scrollbar-color: var(--scroll) transparent; }
 *::-webkit-scrollbar { width: 8px; height: 8px; }
-*::-webkit-scrollbar-thumb { background: #4d4d4d; border-radius: 99px; }
-*::-webkit-scrollbar-thumb:hover { background: #6b6b6b; }
+*::-webkit-scrollbar-thumb { background: var(--scroll); border-radius: 99px; }
+*::-webkit-scrollbar-thumb:hover { background: var(--scroll-h); }
 *::-webkit-scrollbar-track { background: transparent; }
 
 /* ============================ load bar ============================ */
@@ -114,10 +230,10 @@ svg { width: 24px; height: 24px; display: block; flex: 0 0 auto; }
   align-items: center;
   gap: 16px;
   padding: 0 16px;
-  background: rgba(15, 15, 15, .82);
+  background: var(--mast-bg);
   backdrop-filter: blur(18px) saturate(160%);
   -webkit-backdrop-filter: blur(18px) saturate(160%);
-  border-bottom: 1px solid rgba(255, 255, 255, .06);
+  border-bottom: 1px solid rgba(var(--fg-rgb), .06);
 }
 
 .mh-left   { display: flex; align-items: center; gap: 10px; flex: 0 0 auto; }
@@ -141,7 +257,21 @@ svg { width: 24px; height: 24px; display: block; flex: 0 0 auto; }
 .ibtn.sm { width: 32px; height: 32px; }
 .ibtn.sm svg { width: 18px; height: 18px; }
 .ibtn.round { background: var(--raised-2); }
-.ibtn.round:hover { background: #3a3a3a; }
+.ibtn.round:hover { background: var(--hover-2); }
+
+/* The theme switch shows where it will take you, not where you are: a sun on
+   the dark theme, a moon on the light one. Showing the current state instead
+   reads as a status light, and people press it expecting nothing to happen. */
+.theme-btn { position: relative; }
+.theme-btn svg { grid-area: 1 / 1; transition: transform var(--med), opacity var(--med); }
+.theme-btn .th-moon { opacity: 0; transform: rotate(-90deg) scale(.6); }
+.theme-btn .th-sun  { opacity: 1; transform: none; }
+:root[data-theme="light"] .theme-btn .th-moon { opacity: 1; transform: none; }
+:root[data-theme="light"] .theme-btn .th-sun  { opacity: 0; transform: rotate(90deg) scale(.6); }
+
+@media (prefers-reduced-motion: reduce) {
+  .theme-btn svg { transition: none; }
+}
 
 /* logo */
 .logo {
@@ -175,7 +305,7 @@ svg { width: 24px; height: 24px; display: block; flex: 0 0 auto; }
   gap: 8px;
   height: 40px;
   padding: 0 6px 0 16px;
-  background: #121212;
+  background: var(--sunken);
   border: 1px solid var(--line);
   border-right: 0;
   border-radius: var(--pill) 0 0 var(--pill);
@@ -186,7 +316,7 @@ svg { width: 24px; height: 24px; display: block; flex: 0 0 auto; }
 }
 .searchbox:focus-within {
   border-color: var(--blue);
-  background: #0c0c0c;
+  background: var(--sunken-2);
   box-shadow: inset 0 0 0 1px rgba(62, 166, 255, .35);
 }
 .searchbox .search-lead {
@@ -220,7 +350,7 @@ svg { width: 24px; height: 24px; display: block; flex: 0 0 auto; }
   cursor: pointer;
   transition: background var(--fast);
 }
-.search-go:hover { background: #3a3a3a; }
+.search-go:hover { background: var(--hover-2); }
 .search-go:disabled { opacity: .5; cursor: progress; }
 .search-go svg { width: 22px; height: 22px; }
 
@@ -240,7 +370,7 @@ svg { width: 24px; height: 24px; display: block; flex: 0 0 auto; }
   transition: background var(--fast), transform var(--fast), box-shadow var(--fast);
 }
 .pill svg { width: 20px; height: 20px; }
-.pill:hover { background: #3a3a3a; }
+.pill:hover { background: var(--hover-2); }
 .pill:active { transform: scale(.96); }
 
 .avatar {
@@ -252,7 +382,7 @@ svg { width: 24px; height: 24px; display: block; flex: 0 0 auto; }
   font: 600 13px/1 inherit;
   color: #fff;
   background: linear-gradient(140deg, var(--red), #7a2bff);
-  box-shadow: 0 0 0 2px rgba(255, 255, 255, .07);
+  box-shadow: 0 0 0 2px rgba(var(--fg-rgb), .07);
   cursor: default;
 }
 
@@ -377,9 +507,9 @@ body.guide-off .content { margin-left: 0; }
   cursor: pointer;
   transition: background var(--fast), color var(--fast), transform var(--fast);
 }
-.chip:hover  { background: #3f3f3f; }
+.chip:hover  { background: var(--hover-2); }
 .chip:active { transform: scale(.95); }
-.chip.on { background: var(--text); color: #0f0f0f; }
+.chip.on { background: var(--text); color: var(--bg); }
 
 /* ============================ panels ============================ */
 .cols {
@@ -394,7 +524,7 @@ body.guide-off .content { margin-left: 0; }
 
 .panel {
   background: var(--raised);
-  border: 1px solid rgba(255, 255, 255, .05);
+  border: 1px solid rgba(var(--fg-rgb), .05);
   border-radius: var(--r-lg);
   padding: 20px;
   margin-bottom: 16px;
@@ -466,7 +596,7 @@ body.guide-off .content { margin-left: 0; }
 /* ============================ inputs ============================ */
 input[type=text], input[type=password], textarea, select {
   width: 100%;
-  background: #0f0f0f;
+  background: var(--field);
   border: 1px solid var(--line);
   border-radius: var(--r-sm);
   color: var(--text);
@@ -546,12 +676,12 @@ label.fld > span a:hover { text-decoration: underline; }
 .btn.big { width: 100%; height: 46px; font-size: 15px; margin-top: 4px; }
 
 .btn.ghost { background: var(--raised-2); color: var(--text); }
-.btn.ghost:hover:not(:disabled) { background: #3a3a3a; }
+.btn.ghost:hover:not(:disabled) { background: var(--hover-2); }
 
 .btn.yt { background: var(--red); color: #fff; }
 .btn.yt:hover { background: var(--red-deep); }
 
-.btn.danger { background: rgba(255, 92, 92, .16); color: #ff8b8b; }
+.btn.danger { background: rgba(255, 92, 92, .16); color: var(--err-ink); }
 .btn.danger:hover { background: var(--err); color: #fff; }
 
 .btn.sm { height: 32px; padding: 0 13px; font-size: 13px; }
@@ -659,13 +789,13 @@ label.fld > span a:hover { text-decoration: underline; }
 
 .frame {
   position: relative;
-  background: #0b0b0b;
+  background: var(--sunken-2);
   border: 1px solid var(--line);
   border-radius: 14px;
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  box-shadow: 0 18px 50px rgba(0, 0, 0, .6), 0 0 0 6px rgba(255, 255, 255, .03);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, .6), 0 0 0 6px rgba(var(--fg-rgb), .03);
 }
 .frame .cam, .frame .game {
   display: flex;
@@ -683,7 +813,7 @@ label.fld > span a:hover { text-decoration: underline; }
 }
 .frame .game {
   background:
-    repeating-linear-gradient(45deg, #1a1a1a, #1a1a1a 9px, #202020 9px, #202020 18px);
+    repeating-linear-gradient(45deg, var(--ghost-a), var(--ghost-a) 9px, var(--ghost-b) 9px, var(--ghost-b) 18px);
   color: var(--text-3);
   flex: 1;
 }
@@ -691,7 +821,7 @@ label.fld > span a:hover { text-decoration: underline; }
   position: absolute;
   inset: 0;
   pointer-events: none;
-  background: linear-gradient(180deg, transparent 45%, rgba(255, 255, 255, .06) 50%, transparent 55%);
+  background: linear-gradient(180deg, transparent 45%, rgba(var(--fg-rgb), .06) 50%, transparent 55%);
   animation: scan 4.5s linear infinite;
 }
 @keyframes scan { from { transform: translateY(-100%); } to { transform: translateY(100%); } }
@@ -721,7 +851,7 @@ label.fld > span a:hover { text-decoration: underline; }
 .spin {
   width: 16px; height: 16px;
   border-radius: 50%;
-  border: 2px solid rgba(255, 255, 255, .18);
+  border: 2px solid rgba(var(--fg-rgb), .18);
   border-top-color: var(--red);
   animation: spin .8s linear infinite;
 }
@@ -791,14 +921,14 @@ label.fld > span a:hover { text-decoration: underline; }
 
 .log {
   margin-top: 12px;
-  background: #0a0a0a;
+  background: var(--console);
   border: 1px solid var(--line);
   border-radius: var(--r-sm);
   padding: 12px 14px;
   max-height: 240px;
   overflow-y: auto;
   font: 11.5px/1.7 ui-monospace, "Cascadia Mono", Consolas, monospace;
-  color: #9aa4b2;
+  color: var(--console-ink);
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -823,14 +953,14 @@ label.fld > span a:hover { text-decoration: underline; }
   gap: 8px;
   height: 38px;
   padding: 0 6px 0 14px;
-  background: #121212;
+  background: var(--sunken);
   border: 1px solid var(--line);
   border-radius: var(--pill);
   transition: border-color var(--fast), box-shadow var(--fast), background var(--fast);
 }
 .lib-find:focus-within {
   border-color: var(--blue);
-  background: #0c0c0c;
+  background: var(--sunken-2);
   box-shadow: inset 0 0 0 1px rgba(62, 166, 255, .35);
 }
 .lib-find > svg { width: 18px; height: 18px; flex: 0 0 auto; color: var(--text-3); }
@@ -950,6 +1080,7 @@ label.fld > span a:hover { text-decoration: underline; }
   padding: 2px 5px;
   font: 600 11px/1.3 inherit;
   font-variant-numeric: tabular-nums;
+  color: var(--on-media);
 }
 /* Position in the ranking, which is the whole point of the ordering: #1 is
    the one to post first. The score rides along in a quieter weight. */
@@ -966,9 +1097,9 @@ label.fld > span a:hover { text-decoration: underline; }
   font: 700 11px/1.3 inherit;
   color: #fff;
 }
-.clip .rank i { font: 600 10.5px/1.3 inherit; color: var(--warn); font-style: normal; }
+.clip .rank i { font: 600 10.5px/1.3 inherit; color: var(--on-media-warn); font-style: normal; }
 .clip:first-child .rank { background: linear-gradient(120deg, var(--red), #7a2bff); }
-.clip .flag .need { color: var(--warn); }
+.clip .flag .need { color: var(--on-media-warn); }
 .clip .flag {
   position: absolute;
   left: 6px; bottom: 6px;
@@ -980,7 +1111,7 @@ label.fld > span a:hover { text-decoration: underline; }
   border-radius: 4px;
   padding: 2px 6px;
   font-size: 10.5px;
-  color: var(--text-2);
+  color: var(--on-media-2);
 }
 
 .clip .ct {
@@ -1014,7 +1145,7 @@ label.fld > span a:hover { text-decoration: underline; }
   cursor: pointer;
   transition: background var(--fast), color var(--fast), border-color var(--fast);
 }
-.qbtn:hover { background: var(--hover); color: var(--text); border-color: #4a4a4a; }
+.qbtn:hover { background: var(--hover); color: var(--text); border-color: var(--edge); }
 
 /* ============================ upload metadata ============================ */
 .seo {
@@ -1105,7 +1236,7 @@ body.drawer-on .drawer { transform: none; }
 .d-sec h3 { font: 500 14px/1 inherit; margin-bottom: 12px; }
 
 .kv { font-size: 12.5px; color: var(--text-2); margin-bottom: 14px; }
-.kv div { display: flex; justify-content: space-between; gap: 12px; padding: 5px 0; border-bottom: 1px solid rgba(255, 255, 255, .05); }
+.kv div { display: flex; justify-content: space-between; gap: 12px; padding: 5px 0; border-bottom: 1px solid rgba(var(--fg-rgb), .05); }
 .kv b { color: var(--text); font-weight: 500; word-break: break-all; text-align: right; }
 
 /* ============================ shorts player ============================ */
@@ -1113,7 +1244,7 @@ body.drawer-on .drawer { transform: none; }
   position: fixed;
   inset: 0;
   z-index: 150;
-  background: rgba(8, 8, 8, .93);
+  background: rgba(var(--glass-rgb), .93);
   backdrop-filter: blur(22px);
   display: grid;
   place-items: center;
@@ -1125,7 +1256,7 @@ body.drawer-on .drawer { transform: none; }
 body.player-on .player { opacity: 1; pointer-events: auto; }
 body.player-on, body.drawer-on, body.welcome-on { overflow: hidden; }
 
-.player-x { position: absolute; top: 16px; right: 18px; z-index: 3; background: rgba(255, 255, 255, .1); }
+.player-x { position: absolute; top: 16px; right: 18px; z-index: 3; background: var(--on-media-fill); color: var(--on-media); }
 
 .player-body {
   display: flex;
@@ -1152,7 +1283,7 @@ body.player-on .player-body { transform: none; }
   border-radius: 18px;
   overflow: hidden;
   background: #000;
-  box-shadow: 0 30px 80px rgba(0, 0, 0, .8), 0 0 0 1px rgba(255, 255, 255, .08);
+  box-shadow: 0 30px 80px rgba(0, 0, 0, .8), 0 0 0 1px rgba(var(--fg-rgb), .08);
 }
 @media (max-width: 900px) { .pv-shell { height: min(58vh, 460px); } }
 .pv-shell video { width: 100%; height: 100%; object-fit: contain; background: #000; display: block; }
@@ -1213,7 +1344,7 @@ body.player-on .player-body { transform: none; }
   left: 0; right: 0;
   height: 5px;
   border-radius: 99px;
-  background: rgba(255, 255, 255, .28);
+  background: rgba(var(--fg-rgb), .28);
   transform: scaleY(.6);
   transition: transform var(--fast);
 }
@@ -1265,7 +1396,7 @@ body.player-on .player-body { transform: none; }
   padding: 10px 4px;
   border: 0;
   border-radius: var(--r);
-  background: rgba(255, 255, 255, .07);
+  background: rgba(var(--fg-rgb), .07);
   color: var(--text);
   font: 500 10.5px/1 inherit;
   cursor: pointer;
@@ -1273,7 +1404,7 @@ body.player-on .player-body { transform: none; }
   transition: background var(--fast), transform var(--fast), color var(--fast);
 }
 .rbtn svg { width: 22px; height: 22px; }
-.rbtn:hover { background: rgba(255, 255, 255, .16); transform: translateY(-2px); }
+.rbtn:hover { background: rgba(var(--fg-rgb), .16); transform: translateY(-2px); }
 .rbtn:active { transform: scale(.94); }
 .rbtn.on { background: var(--red); }
 .rbtn.danger:hover { background: var(--err); color: #fff; }
@@ -1303,7 +1434,7 @@ body.player-on .player-body { transform: none; }
   height: 34px;
   border-radius: var(--r-sm);
   background:
-    repeating-linear-gradient(90deg, #1c1c1c, #1c1c1c 3px, #232323 3px, #232323 7px);
+    repeating-linear-gradient(90deg, var(--wave-a), var(--wave-a) 3px, var(--wave-b) 3px, var(--wave-b) 7px);
   border: 1px solid var(--line);
   margin-bottom: 6px;
   touch-action: none;
@@ -1343,7 +1474,7 @@ body.player-on .player-body { transform: none; }
 .t-fld { flex: 1; min-width: 0; }
 .t-fld > span { display: block; font-size: 11.5px; color: var(--text-2); margin-bottom: 6px; }
 
-.nudge { display: flex; align-items: center; background: #0f0f0f; border: 1px solid var(--line); border-radius: var(--r-sm); overflow: hidden; }
+.nudge { display: flex; align-items: center; background: var(--field); border: 1px solid var(--line); border-radius: var(--r-sm); overflow: hidden; }
 .nudge button {
   width: 32px;
   height: 34px;
@@ -1389,13 +1520,13 @@ body.player-on .player-body { transform: none; }
   border-radius: var(--r);
   overflow: hidden;
   background: #000;
-  box-shadow: 0 20px 50px rgba(0, 0, 0, .75), 0 0 0 1px rgba(255, 255, 255, .1);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, .75), 0 0 0 1px rgba(var(--fg-rgb), .1);
   animation: minipop .35s var(--ease);
 }
 @keyframes minipop { from { opacity: 0; transform: translateY(24px) scale(.9); } }
 .mini video { width: 100%; aspect-ratio: 9/16; object-fit: cover; display: block; }
 
-.m-bar { height: 3px; background: rgba(255, 255, 255, .2); }
+.m-bar { height: 3px; background: rgba(var(--fg-rgb), .2); }
 .m-bar > i { display: block; height: 100%; width: 0; background: var(--red); }
 
 .m-controls {
@@ -1449,7 +1580,7 @@ body.player-on .player-body { transform: none; }
   transform: translate(-50%, 90px);
   z-index: 170;
   background: var(--text);
-  color: #0f0f0f;
+  color: var(--bg);
   border-radius: var(--r-sm);
   padding: 12px 20px;
   font: 500 13.5px/1.3 inherit;
@@ -1470,10 +1601,10 @@ body.player-on .player-body { transform: none; }
   margin-top: 12px;
   line-height: 1.5;
 }
-.err { background: rgba(255, 92, 92, .1); border: 1px solid rgba(255, 92, 92, .35); color: #ffb3b3; }
-.ok-box { background: rgba(43, 166, 64, .12); border: 1px solid rgba(43, 166, 64, .38); color: #8fe0a0; }
-.warn-box { background: rgba(255, 210, 77, .1); border: 1px solid rgba(255, 210, 77, .32); color: #ffe0a0; font-size: 12.5px; }
-.exact-box { background: rgba(62, 166, 255, .09); border: 1px solid rgba(62, 166, 255, .32); color: #a9d8ff; font-variant-numeric: tabular-nums; font-size: 12.5px; }
+.err { background: rgba(255, 92, 92, .1); border: 1px solid rgba(255, 92, 92, .35); color: var(--err-ink); }
+.ok-box { background: rgba(43, 166, 64, .12); border: 1px solid rgba(43, 166, 64, .38); color: var(--ok-ink); }
+.warn-box { background: rgba(255, 210, 77, .1); border: 1px solid rgba(255, 210, 77, .32); color: var(--warn-ink); font-size: 12.5px; }
+.exact-box { background: rgba(62, 166, 255, .09); border: 1px solid rgba(62, 166, 255, .32); color: var(--blue-ink); font-variant-numeric: tabular-nums; font-size: 12.5px; }
 .exact-box b { display: block; margin-bottom: 5px; color: var(--blue); font-size: 12px; }
 .exact-box span { color: var(--text-3); }
 
@@ -1788,14 +1919,14 @@ body.player-on .player-body { transform: none; }
   cursor: pointer;
   transition: background var(--fast), border-color var(--fast), transform var(--fast);
 }
-.w-link:hover { background: var(--hover); border-color: #454545; }
+.w-link:hover { background: var(--hover); border-color: var(--edge); }
 .w-link:active { transform: scale(.98); }
 
 .w-ico {
   display: grid; place-items: center;
   width: 30px; height: 30px; flex: 0 0 auto;
   border-radius: 9px;
-  background: rgba(255, 255, 255, .06);
+  background: rgba(var(--fg-rgb), .06);
 }
 .w-ico svg { width: 17px; height: 17px; }
 .w-ico.yt { color: var(--red); }
@@ -1814,9 +1945,9 @@ body.player-on .player-body { transform: none; }
   font-size: 10.5px; letter-spacing: .05em; text-transform: uppercase;
   color: var(--text-3);
   padding: 4px 9px; border-radius: var(--pill);
-  background: rgba(255, 255, 255, .06);
+  background: rgba(var(--fg-rgb), .06);
 }
-.w-link.wide:hover .w-copy { color: var(--text); background: rgba(255, 255, 255, .13); }
+.w-link.wide:hover .w-copy { color: var(--text); background: rgba(var(--fg-rgb), .13); }
 
 .w-txt { display: flex; flex-direction: column; min-width: 0; line-height: 1.3; }
 .w-txt b { font: 600 12.5px/1.3 inherit; }
@@ -1855,7 +1986,7 @@ body.player-on .player-body { transform: none; }
   border: 1px solid var(--line);
   color: var(--text);
 }
-.w-go:hover { background: var(--hover); border-color: #454545; }
+.w-go:hover { background: var(--hover); border-color: var(--edge); }
 
 /* ============================ update banner ============================
    Sits inside the launch card, above the credits. Blue rather than the
@@ -1886,7 +2017,7 @@ body.player-on .player-body { transform: none; }
 .wu-bar {
   height: 4px; margin-top: 10px;
   border-radius: var(--pill);
-  background: rgba(255, 255, 255, .1);
+  background: rgba(var(--fg-rgb), .1);
   overflow: hidden;
 }
 .wu-bar.hidden { display: none; }
@@ -1921,7 +2052,7 @@ body.player-on .player-body { transform: none; }
   color: var(--text-3);
   padding: 2px 7px;
   border-radius: var(--pill);
-  background: rgba(255, 255, 255, .06);
+  background: rgba(var(--fg-rgb), .06);
 }
 .g-ver { margin: -8px 12px 12px; font-size: 10.5px; color: var(--text-3); }
 
@@ -1934,7 +2065,7 @@ body.player-on .player-body { transform: none; }
   color: var(--text-3);
   padding: 2px 6px;
   border-radius: var(--pill);
-  background: rgba(255, 255, 255, .07);
+  background: rgba(var(--fg-rgb), .07);
 }
 @media (max-width: 700px) { .logo-ver { display: none; } }
 

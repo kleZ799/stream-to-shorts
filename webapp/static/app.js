@@ -151,6 +151,55 @@ const spy = new IntersectionObserver((entries) => {
   if (el) spy.observe(el);
 });
 
+/* ---------------------------------------------------------------- theme --
+   The theme itself is set in a snippet in <head>, before the first paint.
+   This is only the switch: it flips the attribute everything is keyed off,
+   remembers the choice, and keeps the button honest about what it does.
+
+   Remembered per machine, in localStorage rather than in settings.json,
+   because it is a property of the screen you are looking at — someone with
+   the app on a laptop and a bright desktop wants different answers, and a
+   setting that syncs would give them one. */
+const THEME_KEY = "sts.theme";
+
+function applyTheme(theme) {
+  document.documentElement.setAttribute("data-theme", theme);
+  const btn = $("themeBtn");
+  if (!btn) return;
+  const toLight = theme === "dark";           // what the button would do next
+  btn.setAttribute("aria-pressed", theme === "light" ? "true" : "false");
+  // enTitle is where the translator keeps the English a node was born with.
+  // Setting title alone would work until someone changed language, at which
+  // point the tooltip would revert to whatever it said when the page loaded.
+  btn.dataset.enTitle = toLight ? "Switch to light mode" : "Switch to dark mode";
+  btn.title = I18N.t(btn.dataset.enTitle);
+}
+
+function currentTheme() {
+  return document.documentElement.getAttribute("data-theme") === "light"
+    ? "light" : "dark";
+}
+
+$("themeBtn").onclick = () => {
+  const next = currentTheme() === "dark" ? "light" : "dark";
+  applyTheme(next);
+  try { localStorage.setItem(THEME_KEY, next); } catch (e) { /* not fatal */ }
+};
+
+// A machine that has never been told which theme to use follows the system,
+// and keeps following it — so switching macOS or Windows to light at sunset
+// takes the app with it. Once the button is pressed, that choice wins and
+// this stops applying.
+try {
+  matchMedia("(prefers-color-scheme: light)").addEventListener("change", (e) => {
+    let saved = null;
+    try { saved = localStorage.getItem(THEME_KEY); } catch (err) { /* ignore */ }
+    if (saved !== "light" && saved !== "dark") applyTheme(e.matches ? "light" : "dark");
+  });
+} catch (e) { /* older webview: the theme just stays where it is */ }
+
+applyTheme(currentTheme());
+
 function openDrawer() {
   body.classList.add("drawer-on");
   loadLocations();
