@@ -467,6 +467,13 @@ jobs:
           install /tmp/gh_2.63.2_linux_amd64/bin/gh /usr/local/bin/gh
           gh --version | head -1
 
+          # The workspace belongs to the runner's own user and everything in
+          # here runs as root, which git reads as tampering and refuses to
+          # touch. Only a container hits this, and it stays invisible until
+          # something shells out to git -- which, in this job, is gh, nine
+          # minutes in and one step from the finish.
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
       - name: Work out what we are building, and whether to publish it
         id: tag
         run: |
@@ -668,8 +675,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # -R, rather than letting gh work out the repository from the git
+          # remotes. It cannot do that without git, and this repository has a
+          # fork parent that gh reaches for first when it can.
           gh release upload "${{ steps.tag.outputs.name }}" \
-            StreamToShorts-linux-x86_64 --clobber
+            StreamToShorts-linux-x86_64 --clobber \
+            -R "${{ github.repository }}"
 
       - name: Summary
         run: |
