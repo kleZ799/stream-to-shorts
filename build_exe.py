@@ -38,6 +38,18 @@ LINUX = sys.platform.startswith("linux")
 BUNDLE_ID = "com.github.klez799.streamtoshorts"
 
 
+def _mb(size: int) -> str:
+    """Bytes as the number the user will be shown.
+
+    Divided by 1024s and still called MB, because that is what the GitHub
+    releases page reports, what Explorer and Finder report, and therefore what
+    the README says. Dividing by 1000s gives a different number for the same
+    file -- 230 where every one of those says 219 -- and a figure copied from
+    here into the docs once already disagreed with the download it described.
+    """
+    return f"{size / 1048576:.0f}"
+
+
 def _sep() -> str:
     # PyInstaller's --add-data separator is platform-specific.
     return ";" if os.name == "nt" else ":"
@@ -403,9 +415,9 @@ def main() -> int:
         size = sum(f.stat().st_size for f in out.rglob("*")
                    if f.is_file() and not f.is_symlink())
         noun = "Bundle" if MAC else "Folder"
-        print(f"{noun} size: {size / 1e6:.0f} MB — zip this for a release.")
+        print(f"{noun} size: {_mb(size)} MB — zip this for a release.")
     elif out.exists():
-        print(f"Size: {out.stat().st_size / 1e6:.0f} MB")
+        print(f"Size: {_mb(out.stat().st_size)} MB")
     return 0
 
 

@@ -579,7 +579,13 @@ jobs:
 
           # No glibc check here: the binary cannot answer that question. See
           # the step below, which asks it at the only moment it can be asked.
-          size=$(( $(stat -c%s "$app") / 1000000 ))
+          # Divided by 1024s, not 1000s, and still called MB -- because that
+          # is what the releases page shows, what every file manager shows,
+          # and therefore what the README says about the other two builds.
+          # Reporting the decimal figure here would make this build look 5%
+          # heavier than the other two on the same page, from nothing but a
+          # change of unit halfway down it.
+          size=$(( $(stat -c%s "$app") / 1048576 ))
           echo "size: $size MB"
           echo "SIZE=$size" >> "$GITHUB_ENV"
 

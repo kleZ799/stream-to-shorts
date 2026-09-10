@@ -217,7 +217,7 @@ rendered file.
 
 [**⬇ Download StreamToShorts-macOS-arm64.zip**](https://github.com/kleZ799/stream-to-shorts/releases/latest/download/StreamToShorts-macOS-arm64.zip) — 165 MB, Apple Silicon. **Beta.**
 
-[**⬇ Download StreamToShorts-linux-x86_64**](https://github.com/kleZ799/stream-to-shorts/releases/latest/download/StreamToShorts-linux-x86_64) — about 290 MB, x86-64, self-contained. **Untested on a desktop.**
+[**⬇ Download StreamToShorts-linux-x86_64**](https://github.com/kleZ799/stream-to-shorts/releases/latest/download/StreamToShorts-linux-x86_64) — 278 MB, x86-64, self-contained. **Untested on a desktop.**
 
 > ### ⚠️ Read this before you download the Mac build
 >
@@ -355,9 +355,9 @@ chmod +x StreamToShorts-linux-x86_64
 ./StreamToShorts-linux-x86_64
 ```
 
-**3. Wait for the first start.** It unpacks about 290 MB of itself into `/tmp`
-and loads the transcription models before anything appears. Every launch
-unpacks again — that is the price of being one file that can replace itself.
+**3. Wait for the first start.** It unpacks itself into `/tmp` and loads the
+transcription models before anything appears. Every launch unpacks again —
+that is the price of being one file that can replace itself.
 
 **4. It opens your browser.** Not a tab you have to go and find: it opens on
 its own, at a `127.0.0.1` address that exists only on your machine. If nothing
