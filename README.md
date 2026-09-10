@@ -10,7 +10,7 @@ moments worth posting and cuts them to 9:16 for **Shorts, Reels and TikTok**.
 No subscription, no per-clip credits, no watermark, and nothing is uploaded —
 transcription and ranking both run locally.
 
-[![Download](https://img.shields.io/badge/⬇_Download_for_Windows-229_MB-ff0033?style=for-the-badge)](https://github.com/kleZ799/stream-to-shorts/releases/latest/download/StreamToShorts.exe)
+[![Download](https://img.shields.io/badge/⬇_Download_for_Windows-219_MB-ff0033?style=for-the-badge)](https://github.com/kleZ799/stream-to-shorts/releases/latest/download/StreamToShorts.exe)
 [![License](https://img.shields.io/badge/license-MIT-green?style=for-the-badge)](LICENSE)
 
 [![Download for Mac](https://img.shields.io/badge/⬇_Download_for_Mac-BETA_·_Apple_Silicon-f59e0b?style=for-the-badge)](https://github.com/kleZ799/stream-to-shorts/releases/latest/download/StreamToShorts-macOS-arm64.zip)
@@ -600,7 +600,7 @@ python build_exe.py --onefile --clean
 
 Put `ffmpeg.exe` and `ffprobe.exe` in a `./bin` folder first and they get bundled,
 which is how the published build needs nothing installed. That's what makes it
-229 MB; without them it's 153 MB and ffmpeg has to be on the user's PATH. Drop
+219 MB; without them it's 153 MB and ffmpeg has to be on the user's PATH. Drop
 `--onefile` for a folder build that starts faster but has to be zipped to share.
 
 On a Mac the same command without `--onefile` produces `dist/StreamToShorts.app`:
