@@ -12,6 +12,11 @@ be *renamed*. So the running file is moved aside rather than deleted, the new
 build takes its place, and the app relaunches from the same path. The stale
 file is removed on the next start, once nothing has it open.
 
+Linux needs none of that -- a running binary can be replaced underneath itself,
+because the kernel holds on to the inode rather than the name -- but it is done
+the same way there regardless. One path through this, exercised on both
+platforms, beats two where the one nobody runs is the one that breaks.
+
 That ordering matters: the rename happens only after the download is complete
 and its hash checked, so a half-downloaded or tampered file never becomes the
 thing that runs. If anything fails before that point the running exe has not
@@ -26,9 +31,10 @@ SHA-256 that the API reports. The app is unsigned, so this is integrity
 against a corrupted or swapped download, not proof of authorship -- but it is
 the strongest check available without a code-signing certificate.
 
-Only the one-file build can update itself. The one-folder build is hundreds of
-files, and swapping those under a running process is a different and far more
-fragile problem, so it is told to update by hand instead. The mac build is a
+Only the one-file build can update itself, on Windows and on Linux alike. The
+one-folder build is hundreds of files, and swapping those under a running
+process is a different and far more fragile problem, so it is told to update
+by hand instead. The mac build is a
 .app -- a folder by another name, signed as one unit -- and is told the same.
 Checking still happens everywhere: knowing a new version exists is most of the
 value, and it is the half that cannot go wrong.
@@ -57,7 +63,13 @@ API_LATEST = f"https://api.github.com/repos/{UPDATE_REPO}/releases/latest"
 # has to be asked about the right one. Looking for the .exe on a Mac would
 # report every mac release as having nothing to offer.
 MAC = sys.platform == "darwin"
-ASSET_NAME = "StreamToShorts-macOS-arm64.zip" if MAC else "StreamToShorts.exe"
+LINUX = sys.platform.startswith("linux")
+if MAC:
+    ASSET_NAME = "StreamToShorts-macOS-arm64.zip"
+elif LINUX:
+    ASSET_NAME = "StreamToShorts-linux-x86_64"
+else:
+    ASSET_NAME = "StreamToShorts.exe"
 
 # GitHub serves release downloads off its own domains and redirects between
 # them. Anything else means the API response was not what we think it was, so
@@ -388,6 +400,18 @@ class Install:
         if exe is None:
             raise RuntimeError("Not running as a packaged app.")
 
+        # A release asset arrives with no execute bit: GitHub serves it as a
+        # plain file and carries none. Windows has no such concept; on Linux it
+        # is the difference between an app that relaunches and a "Permission
+        # denied" from a process that has already replaced itself and has
+        # nothing left to go back to. Done before the swap, so a failure here
+        # leaves the running app untouched.
+        if os.name != "nt":
+            try:
+                os.chmod(staged, 0o755)
+            except OSError as e:
+                raise RuntimeError(f"Could not make the download runnable: {e}")
+
         backup = exe.with_name(exe.name + BACKUP_SUFFIX)
         if backup.exists():
             try:
@@ -416,13 +440,20 @@ class Install:
         except OSError:
             pass        # the next launch sweeps it
 
-        # Detached, so it is not killed along with this process a moment later.
-        flags = 0
+        # Detached, so it is not killed along with this process a moment
+        # later. Each platform spells that its own way and rejects the other's,
+        # so only the spelling that applies is passed at all.
+        detach = {}
         if os.name == "nt":
-            flags = getattr(subprocess, "DETACHED_PROCESS", 0) | \
-                    getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+            detach["creationflags"] = (
+                getattr(subprocess, "DETACHED_PROCESS", 0)
+                | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
+        else:
+            # setsid: the replacement leaves this process group, so whatever
+            # signal ends the old one on its way out does not reach it too.
+            detach["start_new_session"] = True
         subprocess.Popen([str(exe)], cwd=str(exe.parent), close_fds=True,
-                         creationflags=flags)
+                         **detach)
 
         # Let the reply reach the browser before the window disappears.
         threading.Timer(1.5, lambda: os._exit(0)).start()
