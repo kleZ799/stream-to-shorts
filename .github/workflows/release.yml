@@ -446,13 +446,21 @@ jobs:
       # A bare distribution image, so even checkout's dependencies are absent.
       # gh comes from its own release rather than an apt repository: one
       # pinned tarball beats a keyring, a source list and a second apt update.
+      #
+      # libgl1 and libglib2.0-0 are for OpenCV, not for anything on this
+      # runner's screen -- there isn't one. PyInstaller works out what to
+      # bundle by importing the package, and `import cv2` on a machine without
+      # libGL.so.1 does not fail quietly: it raises, the hook collects nothing,
+      # and the build either dies or produces something missing the cascade
+      # files that face tracking loads by path.
       - name: Things the container does not ship
         run: |
           set -e
           export DEBIAN_FRONTEND=noninteractive
           apt-get update -qq
           apt-get install -y --no-install-recommends \
-            git curl ca-certificates xz-utils binutils file
+            git curl ca-certificates xz-utils binutils file \
+            libgl1 libglib2.0-0
           curl -fsSL -o /tmp/gh.tar.gz \
             https://github.com/cli/cli/releases/download/v2.63.2/gh_2.63.2_linux_amd64.tar.gz
           tar xzf /tmp/gh.tar.gz -C /tmp
@@ -665,6 +673,8 @@ jobs:
             echo "- Started here, and served its interface when asked."
             echo "- x86-64, needs $GLIBC or newer — Ubuntu 22.04, Debian 12,"
             echo "  Fedora 36, and anything after them."
+            echo "- Also needs \`libGL.so.1\` for OpenCV. Every desktop has it;"
+            echo "  a headless box wants \`apt install libgl1\`."
             echo "- Carries $FFMPEG, statically linked."
             echo "- Opens the default browser rather than a window: WebKit2GTK"
             echo "  cannot be bundled portably, and a working browser beats a"

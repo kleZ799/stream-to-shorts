@@ -1721,6 +1721,15 @@ dynamic linker reads `LD_LIBRARY_PATH` once, at exec. Windows can call
 what `transcriber.py` does; Linux has no equivalent, so bundling them would add
 two gigabytes CTranslate2 could never load.
 
+**libGL is the one thing not in the box.** OpenCV links against
+`libGL.so.1`, and PyInstaller deliberately does not bundle graphics libraries —
+correctly, since the right one belongs to the host's driver stack. Any desktop
+has it. A headless machine does not, and the failure surfaces at the first face
+detection rather than at startup, so the smoke test below cannot catch it. The
+build container installs it too, because PyInstaller learns what to collect by
+importing the package and `import cv2` without libGL raises rather than
+degrading.
+
 **Nothing here has been run on a desktop distribution.** It is built and
 exercised under WSL, which is a real kernel and a real userland but not a
 real desktop — no window manager, no notification daemon, no file manager to

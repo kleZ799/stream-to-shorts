@@ -407,7 +407,18 @@ place — the same as Windows. The download above is the only one you do by hand
 ### What it needs
 
 glibc 2.35 or newer — Ubuntu 22.04, Debian 12, Fedora 36, and anything after
-them. Nothing else at all: no Python, no ffmpeg, no libraries.
+them. No Python and no ffmpeg: both are inside.
+
+One library, and only one: `libGL.so.1`, which OpenCV wants for the face
+tracking. Every desktop already has it, so on a normal installation there is
+nothing to do. On a headless box — a server you are running this on over SSH —
+`sudo apt install libgl1` (or `dnf install mesa-libGL`) is the whole fix. It is
+not bundled because a graphics library belongs to the machine's own driver
+stack; shipping one would be shipping the wrong one.
+
+Without it the app still starts, serves and downloads. It fails at the point it
+first looks for a face, which is a confusing place to find out, so it is worth
+installing up front if you are not on a desktop.
 
 That floor is chosen rather than inherited. The release builds inside an Ubuntu
 22.04 container and refuses to publish a build that asks for more, because
