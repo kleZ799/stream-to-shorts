@@ -423,3 +423,255 @@ jobs:
               echo "- Attached to this run for 7 days. No release was created or touched."
             fi
           } >> "$GITHUB_STEP_SUMMARY"
+
+  linux:
+    # Same reasoning as the mac job: the Windows job is what creates the
+    # release, and this one only adds to it.
+    needs: windows
+    if: ${{ !cancelled() && (needs.windows.result == 'success' || inputs.dry_run == true) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    # Built inside 22.04 rather than on whatever the runner happens to be.
+    #
+    # PyInstaller does not bundle libc. It links against the one on the build
+    # machine, and glibc is only backward compatible -- so a build made on
+    # 24.04 dies on 22.04 with "version `GLIBC_2.38' not found", before a line
+    # of this app runs, on a distribution supported until 2027. Choosing the
+    # floor here rather than inheriting it also means GitHub retiring a runner
+    # image cannot quietly move it.
+    container: ubuntu:22.04
+
+    steps:
+      # A bare distribution image, so even checkout's dependencies are absent.
+      # gh comes from its own release rather than an apt repository: one
+      # pinned tarball beats a keyring, a source list and a second apt update.
+      - name: Things the container does not ship
+        run: |
+          set -e
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update -qq
+          apt-get install -y --no-install-recommends \
+            git curl ca-certificates xz-utils binutils file
+          curl -fsSL -o /tmp/gh.tar.gz \
+            https://github.com/cli/cli/releases/download/v2.63.2/gh_2.63.2_linux_amd64.tar.gz
+          tar xzf /tmp/gh.tar.gz -C /tmp
+          install /tmp/gh_2.63.2_linux_amd64/bin/gh /usr/local/bin/gh
+          gh --version | head -1
+
+      - name: Work out what we are building, and whether to publish it
+        id: tag
+        run: |
+          tag="${{ inputs.tag }}"
+          dry="${{ inputs.dry_run }}"
+
+          if [ "${{ github.event_name }}" = "push" ]; then
+            tag="${GITHUB_REF#refs/tags/}"
+            dry="false"
+          fi
+
+          if [ "$dry" = "true" ]; then publish="false"; else publish="true"; fi
+          ref="${tag:-${{ github.ref_name }}}"
+
+          echo "tag:     ${tag:-(none)}"
+          echo "ref:     $ref"
+          echo "publish: $publish"
+          {
+            echo "name=$tag"
+            echo "ref=$ref"
+            echo "publish=$publish"
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.tag.outputs.ref }}
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-web.txt pyinstaller
+
+      # Statically linked, which is the whole point: a distribution's own
+      # ffmpeg links against that distribution's libraries, so bundling one
+      # would ship an app that runs on Ubuntu and nowhere else. These carry no
+      # dependencies at all, not even libc.
+      #
+      # Not pinned, unlike the mac job's, because this host publishes only its
+      # current release under a stable name. The version that arrived is
+      # printed here and carried into the release summary, so what shipped is
+      # on the record even though it was not chosen.
+      - name: Fetch ffmpeg
+        run: |
+          set -e
+          mkdir -p bin
+          curl -fsSL --retry 5 --retry-delay 10 -o ffmpeg.tar.xz \
+            https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz
+          mkdir -p ffmpeg-tmp
+          tar -xf ffmpeg.tar.xz -C ffmpeg-tmp
+          for tool in ffmpeg ffprobe; do
+            found=$(find ffmpeg-tmp -type f -name "$tool" | head -1)
+            if [ -z "$found" ]; then
+              echo "::error::$tool was not in the archive"
+              exit 1
+            fi
+            mv "$found" "bin/$tool"
+            chmod +x "bin/$tool"
+          done
+          rm -rf ffmpeg.tar.xz ffmpeg-tmp
+
+          # A dynamically linked ffmpeg here is not a build failure. It is a
+          # user finding out, on their first clip, that it cannot start.
+          file bin/ffmpeg
+          if ! file bin/ffmpeg | grep -q "statically linked"; then
+            echo "::error::bin/ffmpeg is not statically linked"
+            exit 1
+          fi
+          ff=$(./bin/ffmpeg -version | head -1)
+          echo "$ff"
+          echo "FFMPEG=$ff" >> "$GITHUB_ENV"
+
+      # --onefile, as on Windows and for the same reason: it is the only shape
+      # the updater can replace. Linux makes that easier rather than harder --
+      # a running binary can be swapped underneath itself there.
+      - name: Build the app
+        run: python build_exe.py --onefile
+
+      - name: Check what came out
+        run: |
+          set -e
+          app="dist/StreamToShorts"
+          if [ ! -f "$app" ]; then
+            echo "::error::the build produced no binary"
+            exit 1
+          fi
+          file "$app"
+
+          # No glibc check here: the binary cannot answer that question. See
+          # the step below, which asks it at the only moment it can be asked.
+          size=$(( $(stat -c%s "$app") / 1000000 ))
+          echo "size: $size MB"
+          echo "SIZE=$size" >> "$GITHUB_ENV"
+
+      # The one check the other two jobs cannot make. This app is a server
+      # behind a window, and on Linux there is no window -- so a runner can
+      # start the real binary and ask it for the real interface. That covers
+      # unpacking, every import, the port bind and the routes: the things that
+      # go wrong at a user's first launch and nowhere earlier.
+      - name: Start it, ask it for the interface, measure what it needs
+        run: |
+          set -e
+          cp dist/StreamToShorts StreamToShorts-linux-x86_64
+          ./StreamToShorts-linux-x86_64 > run.log 2>&1 &
+          pid=$!
+
+          for _ in $(seq 1 180); do
+            grep -q "starting engine on" run.log && break
+            if ! kill -0 "$pid" 2>/dev/null; then
+              echo "::error::it exited before it said anything"
+              cat run.log
+              exit 1
+            fi
+            sleep 1
+          done
+
+          url=$(grep -o "http://127.0.0.1:[0-9]*" run.log | head -1)
+          if [ -z "$url" ]; then
+            echo "::error::it never reported a URL within 180s"
+            cat run.log
+            kill "$pid" 2>/dev/null || true
+            exit 1
+          fi
+          echo "it says it is on $url"
+
+          if ! curl -fsS --retry 20 --retry-delay 2 --retry-connrefused "$url/" -o page.html; then
+            echo "::error::nothing answered on $url"
+            cat run.log
+            kill "$pid" 2>/dev/null || true
+            exit 1
+          fi
+          # The glibc floor, taken while there is something to take it from.
+          #
+          # objdump on the binary itself answers GLIBC_2.14 and means nothing
+          # by it: a one-file build is a bootloader with a compressed archive
+          # stapled on, and every library carrying a real requirement is inside
+          # that archive, invisible until it is unpacked. Measured on a 26.04
+          # machine the bootloader still said 2.14 while the payload needed
+          # 2.43 -- so the obvious check is not merely weak, it passes builds
+          # that cannot start anywhere they claim to run.
+          #
+          # It is unpacked right now, because the app is running. This is the
+          # one moment the question can be answered honestly.
+          mei=$(ls -d /tmp/_MEI* 2>/dev/null | head -1)
+          floor=$(find "$mei" -type f \( -name '*.so' -o -name '*.so.*' \) -print0 \
+                  | xargs -0 -r objdump -T 2>/dev/null \
+                  | grep -o 'GLIBC_[0-9.]*' | sort -Vu | tail -1)
+          kill "$pid" 2>/dev/null || true
+
+          if [ -z "$floor" ]; then
+            echo "::error::could not read the payload's glibc requirement"
+            exit 1
+          fi
+          echo "the payload needs $floor"
+          highest=$(printf 'GLIBC_2.35\n%s\n' "$floor" | sort -V | tail -1)
+          if [ "$highest" != "GLIBC_2.35" ]; then
+            echo "::error::this build needs $floor, above the GLIBC_2.35 floor"
+            echo "::error::something changed the container it is built in"
+            exit 1
+          fi
+          echo "GLIBC=$floor" >> "$GITHUB_ENV"
+
+          if ! grep -qi "<html" page.html; then
+            echo "::error::something answered, but not with the interface"
+            head -40 page.html
+            exit 1
+          fi
+          echo "it served $(stat -c%s page.html) bytes of interface"
+          echo "SHA256=$(sha256sum StreamToShorts-linux-x86_64 | cut -d' ' -f1)" >> "$GITHUB_ENV"
+
+      - name: Attach the build to this run instead
+        if: steps.tag.outputs.publish != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: StreamToShorts-linux-x86_64
+          path: StreamToShorts-linux-x86_64
+          retention-days: 7
+
+      # No archive around it. The updater downloads this asset, makes it
+      # executable and swaps it in, so anything wrapped around it would be one
+      # more thing for the update path to unwrap first.
+      - name: Add it to the release
+        if: steps.tag.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${{ steps.tag.outputs.name }}" \
+            StreamToShorts-linux-x86_64 --clobber
+
+      - name: Summary
+        run: |
+          {
+            if [ "${{ steps.tag.outputs.publish }}" = "true" ]; then
+              echo "### Linux build"
+            else
+              echo "### Dry run — Linux build (nothing published)"
+            fi
+            echo ""
+            echo "- \`StreamToShorts-linux-x86_64\` — ${SIZE} MB, SHA-256 \`$SHA256\`"
+            echo "- Started here, and served its interface when asked."
+            echo "- x86-64, needs $GLIBC or newer — Ubuntu 22.04, Debian 12,"
+            echo "  Fedora 36, and anything after them."
+            echo "- Carries $FFMPEG, statically linked."
+            echo "- Opens the default browser rather than a window: WebKit2GTK"
+            echo "  cannot be bundled portably, and a working browser beats a"
+            echo "  blank window. Running from source with python3-gi installed"
+            echo "  still gets a real window."
+            echo "- \`chmod +x\` it and run it. It updates itself from then on."
+            if [ "${{ steps.tag.outputs.publish }}" != "true" ]; then
+              echo "- Attached to this run for 7 days. No release was created or touched."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
