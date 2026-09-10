@@ -53,8 +53,9 @@ engineering is.
 > ffmpeg into 9:16 with the webcam stacked over the gameplay.
 >
 > Everything runs locally except one LLM call. It ships as a desktop app for
-> Windows and macOS — a FastAPI server in a native webview window, packaged
-> with PyInstaller.
+> Windows, macOS and Linux — a FastAPI server behind a native webview window,
+> or behind the browser on Linux, where that window cannot be bundled and
+> carried. Packaged with PyInstaller.
 >
 > The interesting parts aren't the models, they're everything around them:
 > a 3h47m VOD does not fit in a context window, so ranking is chunked and

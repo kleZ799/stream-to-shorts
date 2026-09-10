@@ -20,6 +20,16 @@ It is built and checked by GitHub's macOS runners, not by me. It may not start
 at all. [Tell me what happens](https://github.com/kleZ799/stream-to-shorts/issues/new)
 and I'll fix it. Windows is the tested build.
 
+[![Download for Linux](https://img.shields.io/badge/⬇_Download_for_Linux-x86--64-3b82f6?style=for-the-badge)](https://github.com/kleZ799/stream-to-shorts/releases/latest/download/StreamToShorts-linux-x86_64)
+
+**The Linux build has not been tested on a real Linux desktop.** It is built
+and run under WSL here, and every published build is started by the release
+workflow and asked for its interface before the release exists — so it does
+start, it does serve, and its ffmpeg does work. Nobody has yet sat at a
+desktop distribution and made clips with it.
+[Tell me what happens](https://github.com/kleZ799/stream-to-shorts/issues/new) and I'll fix it. It opens in your
+browser rather than in a window of its own.
+
 <!-- These read GitHub live, so a new release renames them on its own and
      there is no version number in this file to go stale. -->
 [![Latest version](https://img.shields.io/github/v/release/kleZ799/stream-to-shorts?style=flat-square&label=latest%20build&color=ff0033)](https://github.com/kleZ799/stream-to-shorts/releases/latest)
@@ -141,6 +151,12 @@ running process leaves a signature that no longer matches its contents — the
 app macOS then refuses to open being the one the update was meant to deliver.
 So it says a version is out, and you download it.
 
+The Linux build updates itself exactly as Windows does — more easily, in
+fact. Linux will replace a running binary outright, because the kernel is
+holding the file rather than the name; Windows insists on the rename first.
+It is done the same way on both anyway, so that the path which runs on
+every update is the path that gets exercised.
+
 > Builds before v1.5.0 were compiled before any of this existed and cannot be
 > told about new versions. Those need one manual download — the last one.
 
@@ -184,6 +200,8 @@ rendered file.
 
 [**⬇ Download StreamToShorts-macOS-arm64.zip**](https://github.com/kleZ799/stream-to-shorts/releases/latest/download/StreamToShorts-macOS-arm64.zip) — 165 MB, Apple Silicon. **Beta.**
 
+[**⬇ Download StreamToShorts-linux-x86_64**](https://github.com/kleZ799/stream-to-shorts/releases/latest/download/StreamToShorts-linux-x86_64) — about 290 MB, x86-64, self-contained. **Untested on a desktop.**
+
 > ### ⚠️ Read this before you download the Mac build
 >
 > **It has never been run on a Mac.** I develop on Windows and don't own one.
@@ -201,7 +219,7 @@ rendered file.
 
 Double-click it. On first run it asks for a [free Gemini API key](https://aistudio.google.com/apikey), which is stored only on your machine.
 
-**On Windows, this is the only time you download by hand.** From v1.5.0 the app
+**On Windows and Linux, this is the only time you download by hand.** From v1.5.0 the app
 updates itself: it notices new releases, checks them, and replaces itself in
 place.
 
@@ -292,6 +310,87 @@ instead: every line here is public, the app is built from this repository by
 GitHub's own runners with a
 [readable build log](https://github.com/kleZ799/stream-to-shorts/actions), and
 each release publishes a SHA-256 for the file.
+
+</details>
+
+**On Linux**, make the download executable and run it. It is the same app doing
+the same work, with two differences worth knowing first: it opens in your
+browser instead of a window of its own, and it needs glibc 2.35 or newer.
+
+<details>
+<summary><b>Using it on Linux — the whole thing, step by step</b></summary>
+
+**Nobody has run this on a desktop distribution yet.** It is built and
+exercised under WSL, and the release workflow starts every published build
+and fetches the interface out of it — which proves it unpacks, imports,
+binds a port and serves. It does not prove a full render works on Fedora, or
+that your file manager opens where it should. If something is wrong, that is
+a bug here rather than something you did: [say so](https://github.com/kleZ799/stream-to-shorts/issues/new).
+
+**1. Download.** Take `StreamToShorts-linux-x86_64` from the
+[latest release](https://github.com/kleZ799/stream-to-shorts/releases/latest). x86-64 only — there is no ARM build.
+
+**2. Make it executable, and run it.** A download arrives without the execute
+bit. That is normal and not something you did:
+
+```bash
+chmod +x StreamToShorts-linux-x86_64
+./StreamToShorts-linux-x86_64
+```
+
+**3. Wait for the first start.** It unpacks about 290 MB of itself into `/tmp`
+and loads the transcription models before anything appears. Every launch
+unpacks again — that is the price of being one file that can replace itself.
+
+**4. It opens your browser.** Not a tab you have to go and find: it opens on
+its own, at a `127.0.0.1` address that exists only on your machine. If nothing
+opens — a server with no desktop, an SSH session — the address is printed in
+the terminal and works from any browser on that machine.
+
+**5. Paste a Gemini key.** It asks on first run.
+[Get a free one](https://aistudio.google.com/apikey). It is stored at
+`~/.config/StreamToShorts/settings.json` and goes nowhere else.
+
+**6. Give it a video.** Paste a YouTube URL, or drag a file straight in. Paste
+a *channel* URL and it lists recent videos to pick from.
+
+**7. Find the clips.** They land in `~/Videos/StreamToShorts/shorts/`, in a
+folder named after the video, and **Reveal** opens your file manager on them.
+Sources and transcripts go to `~/Videos/StreamToShorts/output/`.
+
+**8. Updating.** It notices new releases, checks them, and replaces itself in
+place — the same as Windows. The download above is the only one you do by hand.
+
+### What is different from the Windows build
+
+- **It runs in your browser rather than in a window of its own.** pywebview's
+  Linux backend is WebKit2GTK, and WebKit2GTK cannot be bundled and carried:
+  its typelibs and two hundred shared libraries would all have to come along,
+  and even then WebKit renders pages in a separate process it locates by a path
+  compiled into the library when *your* distribution built it. A window that
+  comes up blank is worse than no window, so the app opens something that
+  works. Run it from source with `python3-gi` and `gir1.2-webkit2-4.1`
+  installed and you get a real window, because there it uses your system's own.
+- **Transcribing runs on the CPU.** The pip CUDA libraries unpack somewhere the
+  dynamic linker was never told about, and a process cannot add to its own
+  library path once it has started — so bundling them would ship two gigabytes
+  that nothing is able to load. Windows can register those directories at
+  runtime, which is the whole reason it gets the GPU and this does not.
+- **Files live in Linux places** — `~/Videos/StreamToShorts` for output,
+  `~/.config/StreamToShorts` for settings, instead of `Videos` and `%APPDATA%`.
+- Everything else is the same app: same ranking, same layouts, same editing,
+  same pause button. ffmpeg is bundled and statically linked, so it does not
+  care what your distribution ships or whether it ships one at all.
+
+### What it needs
+
+glibc 2.35 or newer — Ubuntu 22.04, Debian 12, Fedora 36, and anything after
+them. Nothing else at all: no Python, no ffmpeg, no libraries.
+
+That floor is chosen rather than inherited. The release builds inside an Ubuntu
+22.04 container and refuses to publish a build that asks for more, because
+PyInstaller does not bundle libc — it links against whatever the build machine
+had, and glibc only promises to work forwards.
 
 </details>
 
@@ -611,6 +710,22 @@ against dylibs in `/opt/homebrew` and would only work on your own machine.
 PyInstaller cannot cross-compile, so the published mac build is made on a macOS
 runner by [the release workflow](.github/workflows/release.yml), which is also
 where those two download URLs live.
+
+On Linux the same `--onefile` command produces `dist/StreamToShorts`, with no
+extension. Put static `ffmpeg` and `ffprobe` in `./bin` — a distribution's own
+ffmpeg links against that distribution's libraries and would only run on your
+own machine, the same trap as Homebrew on a Mac. No webview backend is bundled,
+so the built app opens a browser; `python desktop.py` from source with
+`python3-gi` installed opens a real window instead.
+
+Whichever glibc you build against becomes the oldest one your build will run
+on — and the binary will not tell you which that is. `objdump` on a one-file
+build reports what the bootloader needs, which is nothing much; the libraries
+that set the real floor are compressed inside it and invisible until it runs.
+Measured on Ubuntu 26.04, the bootloader claimed 2.14 while the payload wanted
+2.43. So the release workflow builds inside an Ubuntu 22.04 container and reads
+the floor off the unpacked payload while a copy of the app is running, that
+being the only moment the payload exists.
 
 **Drop a file or paste a link.** Drag a VOD straight in, or paste a YouTube URL. Paste a *channel* link and it lists the 12 most recent videos as a grid to pick from.
 

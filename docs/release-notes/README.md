@@ -28,14 +28,24 @@ notes that the mac build is a beta and has not been run on a Mac** — it is
 built and checked by CI, and that is all. Someone downloading it should know
 that before they do, not after.
 
+And `StreamToShorts-linux-x86_64`, built inside an Ubuntu 22.04 container so
+the glibc floor is chosen rather than inherited. **Say in the notes that it
+has not been tested on a desktop distribution.** The workflow does more for
+this one than for either of the others — it starts the binary, fetches the
+interface out of it, and measures what glibc the unpacked payload actually
+needs — but a container is not a desktop, and nobody has yet made clips with
+it on one.
+
 ## Trying a build without releasing it
 
 Run the **Release** workflow by hand from the Actions tab, tick **dry run**,
-and leave the tag empty. It builds both apps from the branch you picked,
+and leave the tag empty. It builds all three apps from the branch you picked,
 checks them, publishes nothing, and attaches the results to the run for a
 week.
 
 Worth doing before a tag when anything about packaging changed — especially
 for the mac build, which cannot be tried here first. What it proves: that it
 builds, that the version and signature are right, that ffmpeg survived
-bundling. What it cannot prove: that the app opens on a real Mac.
+bundling, and — on Linux only — that the app starts and serves its interface.
+What it cannot prove: that the app opens on a real Mac, or that a real Linux
+desktop behaves like the container it was built in.

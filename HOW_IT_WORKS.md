@@ -1642,7 +1642,7 @@ this workflow, scripted.
 
 ---
 
-## 16. Packaging into a Windows .exe (and a mac .app)
+## 16. Packaging: a Windows .exe, a mac .app, a Linux binary
 
 `build_exe.py` wraps PyInstaller. `--onedir` (default) starts faster;
 `--onefile` is a single self-contained exe that unpacks itself each launch.
@@ -1653,7 +1653,8 @@ everything PyInstaller's static analysis can't see:
 `webview.platforms.edgechromium`, `faster_whisper`, `ctranslate2`, `cv2`,
 `google.genai`, `yt_dlp`, and the uvicorn loop/protocol/lifespan modules.
 `torch`, `matplotlib`, `tkinter` and `pytest` are excluded to keep size down
-(229 MB with ffmpeg, 153 MB without).
+(219 MB with ffmpeg, 153 MB without). The webview backend is the one hidden
+import that differs per platform, and each is unavailable on the others.
 
 ### What changes on a Mac
 
@@ -1688,6 +1689,69 @@ removes that, and it costs $99 a year.
 The published zip is made with `ditto`, not `zip`: a `.app` is full of symlinks
 and carries a signature that plain `zip` mangles, and a mangled signature is an
 app that will not open.
+
+### What changes on Linux
+
+Built by the release workflow too — not because it must be, since WSL would do
+it, but because what ships should be built by the thing that ships it. The
+branch in `build_exe.py` is short, and most of it is things left out:
+
+| | Windows | Linux |
+|---|---|---|
+| Shape | `.exe`, or a folder | `StreamToShorts`, no extension, either shape |
+| Webview backend | Edge WebView2, via `winforms` + `clr` | none — it opens the user's browser |
+| Icon | `assets/icon.ico` | none; a Linux app's icon lives in a `.desktop` file |
+| Version metadata | `version_info.txt`, compiled in | none; there is nowhere to put one |
+| CUDA | bundled by `--onedir` | never |
+
+**No webview backend**, because the one that exists cannot travel. pywebview
+reaches WebKit2GTK through PyGObject, whose typelibs and some two hundred
+shared libraries would all have to come along — and even bundled they are half
+of it, because WebKit renders pages in a separate `WebKitWebProcess` that it
+locates by a path compiled into the library when the distribution built it. Get
+that wrong and the app opens a window that stays blank, which is worse than
+opening none: `desktop.py` already falls back to the browser, and a browser is
+a working app. Running from source is untouched by any of this — there
+pywebview finds the system's own `python3-gi` and opens a real window.
+
+**No CUDA**, for a reason that has nothing to do with the hardware. The pip
+CUDA wheels put their `.so` files under `site-packages/nvidia/*/lib`, and the
+dynamic linker reads `LD_LIBRARY_PATH` once, at exec. Windows can call
+`add_dll_directory` from inside the already-running process, which is exactly
+what `transcriber.py` does; Linux has no equivalent, so bundling them would add
+two gigabytes CTranslate2 could never load.
+
+**Nothing here has been run on a desktop distribution.** It is built and
+exercised under WSL, which is a real kernel and a real userland but not a
+real desktop — no window manager, no notification daemon, no file manager to
+reveal a clip in. What CI proves is below; what nobody has done is sit in
+front of Fedora and make a Short with it.
+
+**No version resource**, so the workflow cannot check the built artefact the
+way it checks the exe's `FileVersion` or the bundle's `Info.plist`. It does
+something better instead: it runs the thing. The Linux job starts the real
+binary, waits for it to report a port, fetches `/`, and checks that what comes
+back is the interface. That covers unpacking, every import, the port bind and
+the routes — the failures that happen at a user's first launch and nowhere
+earlier. Neither of the other two jobs can make that check, because on Windows
+and macOS the app is a window rather than something a runner can talk to.
+
+**The glibc floor is chosen rather than inherited.** PyInstaller does not
+bundle libc; it links against the build machine's, and glibc only promises to
+work forwards. So the job builds inside an `ubuntu:22.04` container instead of
+on whatever the runner image has become — which also means GitHub retiring a
+runner image cannot quietly move the floor out from under everyone below it.
+
+Measuring that floor takes one more trick. `objdump` on the built binary
+reports `GLIBC_2.14` and means nothing by it: a one-file build is a bootloader
+with a compressed archive stapled on, and every library carrying a real
+requirement is inside the archive. Built on Ubuntu 26.04 the bootloader still
+said 2.14 while the payload wanted 2.43 — so the obvious check does not merely
+under-report, it passes builds that cannot start anywhere they claim to run.
+The payload does exist unpacked, under `/tmp/_MEI…`, for exactly as long as the
+app is running. So the floor is read from there during the smoke test above,
+and a build wanting more than 2.35 is rejected.
+
 
 `desktop.py` solves four problems specific to being a windowed app.
 
