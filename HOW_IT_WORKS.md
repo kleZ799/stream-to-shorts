@@ -1688,7 +1688,20 @@ removes that, and it costs $99 a year.
 
 The published zip is made with `ditto`, not `zip`: a `.app` is full of symlinks
 and carries a signature that plain `zip` mangles, and a mangled signature is an
-app that will not open.
+app that will not open. The same applies one step earlier, to the copy into the
+staging folder — `cp` there would be the identical mistake — so that is
+`ditto` as well, and the signature is re-verified afterwards rather than assumed.
+
+The archive holds a folder rather than the bare bundle, so `docs/install/macos.txt`
+can ride along as `READ ME FIRST.txt`. Nobody reads a file on a releases page;
+they read the one next to what they just unzipped — and this is a build whose
+first launch is *supposed* to be refused, which is worth knowing beforehand
+rather than discovering as a dialog saying the app is damaged.
+
+Linux gets the same text as a second asset instead, `docs/install/linux.txt`
+published as `StreamToShorts-linux-README.txt`. The binary there cannot carry
+anything: the updater downloads that asset and swaps it into place, so it has
+to stay exactly a binary.
 
 ### What changes on Linux
 

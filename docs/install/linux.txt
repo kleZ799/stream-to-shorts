@@ -1,0 +1,160 @@
+STREAM TO SHORTS - Linux
+Turn long videos into vertical Shorts, on your own machine.
+
+github.com/kleZ799/stream-to-shorts
+
+
+READ THIS FIRST
+---------------
+NOBODY HAS RUN THIS ON A DESKTOP DISTRIBUTION YET.
+
+It is built and exercised under WSL, and every published build is started by
+the release workflow and asked for its interface before the release exists --
+so it does unpack, import, bind a port and serve you the app. That is not the
+same thing as somebody sitting in front of Fedora and making a Short with it.
+
+If something goes wrong, that is a bug here and not something you did. There
+are instructions at the bottom, and I would like to hear about it.
+
+
+INSTALLING
+----------
+There is nothing to install. The download is the program.
+
+    chmod +x StreamToShorts-linux-x86_64
+    ./StreamToShorts-linux-x86_64
+
+A downloaded file arrives without permission to run -- that is the browser
+being careful, not something wrong with the file.
+
+Put it wherever you like. ~/.local/bin or ~/Applications are both reasonable.
+It updates itself in place from then on, so wherever you put it is where new
+versions will appear.
+
+The first start is the slowest: it unpacks itself into /tmp and loads the
+transcription models before anything appears. Every launch unpacks again --
+that is the price of being one file that is able to replace itself.
+
+
+WHAT IT NEEDS
+-------------
+  glibc 2.35 or newer
+      Ubuntu 22.04, Debian 12, Fedora 36, and anything after them. That floor
+      is chosen rather than inherited: the release is built inside an Ubuntu
+      22.04 container and refuses to publish anything that asks for more.
+
+  libGL.so.1
+      OpenCV wants it, for the face tracking. Every desktop already has it,
+      so on a normal installation there is nothing to do. On a headless box --
+      a server you are running this on over SSH -- install it first:
+
+          sudo apt install libgl1          Debian, Ubuntu
+          sudo dnf install mesa-libGL      Fedora
+
+      It is not bundled because a graphics library belongs to your machine's
+      own driver stack; shipping one would be shipping the wrong one. Without
+      it the app still starts, serves and downloads -- and then fails at the
+      moment it first looks for a face, which is a confusing place to find
+      out. Worth installing up front if you are not on a desktop.
+
+  notify-send, optionally
+      For the notification when a run finishes. Most desktops have it, as
+      part of libnotify-bin; KDE's kdialog is used instead when that is what
+      is installed. With neither, the app writes a line in its log and carries
+      on, and you check on it yourself.
+
+Nothing else. No Python, no ffmpeg -- both are inside the file. x86-64 only;
+there is no ARM build.
+
+
+IT OPENS YOUR BROWSER, NOT A WINDOW
+-----------------------------------
+This is deliberate, and it is the one real difference from the Windows build.
+
+Windows carries a webview in the operating system and so does macOS. Linux
+carries neither. The one that exists here, WebKit2GTK, cannot be bundled and
+carried: it renders pages in a separate process that it finds by a path
+compiled in when *your* distribution built it, so a bundled copy opens a
+window that stays blank. A working browser beats a blank window.
+
+It opens on its own, at a 127.0.0.1 address that exists only on your machine.
+If nothing opens -- a server with no desktop, an SSH session -- the address is
+printed in the terminal and works from any browser on that machine.
+
+Running from source, with python3-gi installed, does get you a real window.
+
+
+USING IT
+--------
+1. Paste a Gemini API key. It asks on the first run, and a free one takes a
+   minute to get: aistudio.google.com/apikey
+
+   It is stored at ~/.config/StreamToShorts/settings.json and goes nowhere
+   else except to Google, by you.
+
+2. Give it a video. Paste a YouTube URL or drag a file straight in. Paste a
+   *channel* URL and it lists recent videos to pick from.
+
+3. Describe the layout in plain English -- "webcam bottom left, gameplay
+   above it", "just the speaker, filling the frame". A live preview redraws
+   as you type. Choose how many clips you want and how long they should be.
+
+4. Start it, and go and do something else. Everything from here runs on this
+   machine: it downloads, transcribes, ranks the moments and cuts them to
+   9:16. A long VOD takes a while. Transcribing runs on the CPU.
+
+   The app raises a desktop notification when it finishes, so you do not have
+   to watch it. If you are looking at the page it stays quiet.
+
+5. Find the clips in:
+
+       ~/Videos/StreamToShorts/shorts/
+
+   in a folder named after the video. The Reveal button opens your file
+   manager on them. Sources and transcripts go to
+   ~/Videos/StreamToShorts/output/, and that folder is safe to delete when
+   you want the disk space back.
+
+
+UPDATES
+-------
+It updates itself, the same as the Windows build does. It notices new
+releases, checks the download against the SHA-256 GitHub publishes for it,
+and replaces itself in place. The download you just did is the only one you
+do by hand.
+
+Nothing is touched until the checksum matches, so a failed download leaves
+the working app exactly as it was.
+
+
+IF SOMETHING GOES WRONG
+-----------------------
+Run it from a terminal rather than from a launcher -- errors print where you
+can see them. If it was started without a terminal, it writes to:
+
+    ~/Videos/StreamToShorts/app.log
+
+Open an issue with what you saw, that log, and which distribution you are on:
+
+    github.com/kleZ799/stream-to-shorts/issues/new
+
+Nobody has used this on a desktop yet, so the first few reports are worth a
+great deal. "It printed this and stopped" is enough to act on.
+
+
+UNINSTALLING
+------------
+Delete the file. Then, if you want it gone completely:
+
+    ~/.config/StreamToShorts      settings and your key
+    ~/Videos/StreamToShorts       clips, sources, logs
+
+Nothing is installed anywhere else. No service, no autostart entry, nothing
+written outside your home directory.
+
+
+MIT licensed. Fork it, ship it, build on it -- the licence asks one thing:
+keep the copyright notice.
+
+Built by Parth Bhadana.
+youtube.com/@ParthBhadana799 | github.com/kleZ799 | discord.gg/jnMrGbBz3m

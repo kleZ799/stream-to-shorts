@@ -1,5 +1,12 @@
 # Release notes
 
+The install instructions that ship *inside* the downloads live in
+`docs/install/`: `macos.txt` goes into the zip as `READ ME FIRST.txt`, and
+`linux.txt` is published beside the binary as
+`StreamToShorts-linux-README.txt`. They repeat what the README says, for the
+person holding the download and not the page — so a change to how either
+platform is installed or used belongs in both.
+
 One file per tag, named exactly after it: `v1.6.0.md` for tag `v1.6.0`.
 
 The release workflow uses the matching file as the release body. When there

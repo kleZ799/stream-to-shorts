@@ -1,0 +1,151 @@
+STREAM TO SHORTS - macOS
+Turn long videos into vertical Shorts, on your own Mac.
+
+github.com/kleZ799/stream-to-shorts
+
+
+READ THIS FIRST
+---------------
+Expect step 3 to fail. That is normal, it happens to every app that has not
+been notarised by Apple, and it is not the beta part.
+
+The beta part is this: THIS APP HAS NEVER BEEN RUN ON A MAC. I develop on
+Windows and do not own one. It is built and checked by GitHub's macOS runners
+-- the build is signed, its version is verified, the bundled ffmpeg is
+confirmed to run -- but no human being has ever double-clicked it.
+
+So it might not start. If it does not, that is a bug in this project and not
+something you did wrong, and I would like to hear about it. There are
+instructions at the bottom.
+
+
+INSTALLING
+----------
+1. Drag StreamToShorts.app to your Applications folder.
+
+   It runs from anywhere, but Applications is where Spotlight and updates
+   expect to find it.
+
+2. Double-click it.
+
+3. Let macOS refuse. It will say the app is damaged, or that Apple cannot
+   check it for malware. Nothing is damaged.
+
+4. Allow it, once:
+
+       System Settings  ->  Privacy & Security
+
+   Scroll down to the line saying StreamToShorts was blocked, click
+   "Open Anyway", and confirm. It opens normally every time after this.
+
+   (Right-click -> Open, the old shortcut for this, stopped working in
+   macOS 15.)
+
+5. Wait for the first start. It unpacks itself and loads the transcription
+   models before the window appears, so the first launch after a reboot is
+   the slowest one. There is no browser and no address bar; it is its own
+   window.
+
+
+WHY macOS BLOCKS IT
+-------------------
+The app is signed, but not by Apple. Notarising costs $99 a year and this is
+free software. Gatekeeper is reporting a missing Apple signature -- it is not
+telling you it found something wrong with the file.
+
+What you can check instead:
+
+  - Every line of it is public: github.com/kleZ799/stream-to-shorts
+  - It is built from that repository by GitHub's own runners, and the build
+    log is readable by anyone: github.com/kleZ799/stream-to-shorts/actions
+  - Each release publishes a SHA-256 for the file.
+
+
+USING IT
+--------
+1. Paste a Gemini API key. It asks on the first run, and a free one takes a
+   minute to get: aistudio.google.com/apikey
+
+   It is stored only on this Mac, at
+   ~/Library/Application Support/StreamToShorts/settings.json
+   and it is never sent anywhere except to Google, by you.
+
+2. Give it a video. Paste a YouTube URL or drag a file straight into the
+   window. Paste a *channel* URL and it lists recent videos to pick from.
+
+3. Describe the layout in plain English -- "webcam bottom left, gameplay
+   above it", "just the speaker, filling the frame". A live preview redraws
+   as you type. Choose how many clips you want and how long they should be.
+
+4. Start it, and go and do something else. Everything from here runs on this
+   Mac: it downloads, transcribes, ranks the moments and cuts them to 9:16.
+   A long VOD takes a while.
+
+   The app raises a notification when it finishes, so you do not have to
+   watch it. If you are looking at the window it stays quiet.
+
+5. Find the clips in:
+
+       ~/Movies/StreamToShorts/shorts/
+
+   in a folder named after the video. The Reveal button in the app opens
+   Finder right on them. Sources and transcripts go to
+   ~/Movies/StreamToShorts/output/, and that folder is safe to delete when
+   you want the disk space back.
+
+
+WHAT IS DIFFERENT FROM THE WINDOWS BUILD
+----------------------------------------
+  - Transcribing runs on the CPU, and it is the slow step. There is no CUDA
+    on a Mac and the transcription engine has no Metal backend, so an
+    M-series CPU does all of it. It works; a long VOD takes a while.
+
+  - Apple Silicon only -- an M1 or later. There is no Intel build.
+
+  - No self-updating. The app tells you when a new version exists but cannot
+    install it: a .app is hundreds of files signed as a single unit, and
+    replacing them under a running process leaves a signature that no longer
+    matches, so the app macOS would then refuse to open is the one the update
+    was meant to deliver. When it says there is a new version, download it.
+
+  - Everything else is the same app. Same ranking, same layouts, same
+    editing, same pause button, and ffmpeg is bundled so there is nothing
+    else to install.
+
+
+IF IT DOES NOT OPEN, OR OPENS AND DOES NOTHING
+----------------------------------------------
+That part is the beta, and it is worth reporting. Two things help:
+
+  1. ~/Movies/StreamToShorts/app.log
+     The app writes startup errors here, including ones it has no window to
+     show you in.
+
+  2. Running it from Terminal, so errors print where you can see them:
+
+         /Applications/StreamToShorts.app/Contents/MacOS/StreamToShorts
+
+Open an issue with either of those and your macOS version:
+
+    github.com/kleZ799/stream-to-shorts/issues/new
+
+I have no Mac to reproduce it on, so a paste of the actual error is the whole
+difference between fixed and not fixed.
+
+
+UNINSTALLING
+------------
+Drag StreamToShorts.app to the Trash. Then, if you want it gone completely:
+
+    ~/Library/Application Support/StreamToShorts    settings and your key
+    ~/Movies/StreamToShorts                         clips, sources, logs
+
+Nothing is installed anywhere else, and nothing was added to your login
+items or your system.
+
+
+MIT licensed. Fork it, ship it, build on it -- the licence asks one thing:
+keep the copyright notice.
+
+Built by Parth Bhadana.
+youtube.com/@ParthBhadana799 | github.com/kleZ799 | discord.gg/jnMrGbBz3m

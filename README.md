@@ -256,7 +256,9 @@ and it is not the beta part.
 [latest release](https://github.com/kleZ799/stream-to-shorts/releases/latest).
 Apple Silicon only — an M1 or later. There is no Intel build.
 
-**2. Unzip.** Double-click the zip. You get `StreamToShorts.app`.
+**2. Unzip.** Double-click the zip. You get a `StreamToShorts` folder with
+the app in it and `READ ME FIRST.txt` beside it — the same steps as these,
+for when you come back to this in six months and the tab is long closed.
 
 **3. Drag it to Applications.** It runs from anywhere, but Applications is
 where updates and Spotlight expect it.
@@ -346,6 +348,12 @@ a bug here rather than something you did: [say so](https://github.com/kleZ799/st
 
 **1. Download.** Take `StreamToShorts-linux-x86_64` from the
 [latest release](https://github.com/kleZ799/stream-to-shorts/releases/latest). x86-64 only — there is no ARM build.
+
+`StreamToShorts-linux-README.txt` is published beside it and says everything
+below. A separate file rather than an archive around the binary, because the
+updater downloads that binary and swaps it into place — putting it in a
+tarball would mean teaching the update path to unwrap one on every release, to
+solve what a second file solves for nothing.
 
 **2. Make it executable, and run it.** A download arrives without the execute
 bit. That is normal and not something you did:

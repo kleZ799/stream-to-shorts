@@ -374,13 +374,31 @@ jobs:
           echo "bundled ffmpeg: ${ff#dist/}"
           "$ff" -version | head -1
 
-      # ditto, not zip: a .app is full of symlinks and carries a signature
-      # that plain zip mangles, and a mangled signature is an app that will
-      # not open.
-      - name: Zip the bundle
+      # ditto, not zip, and ditto for the copy as well: a .app is full of
+      # symlinks and carries a signature that plain zip mangles, and a mangled
+      # signature is an app that will not open. cp would be the same mistake
+      # one step earlier, so the staging folder is filled with ditto too and
+      # the signature is checked again afterwards rather than assumed.
+      #
+      # The archive holds a folder now rather than the bare .app, so the
+      # instructions can travel with it. Nobody reads a file on a releases
+      # page; they read the one sitting next to the thing they just unzipped.
+      # This build in particular has a first launch that is *supposed* to
+      # fail, and being told that beforehand is the difference between a
+      # Gatekeeper dialog and a deleted download.
+      - name: Zip the bundle, with the instructions beside it
         run: |
+          set -e
+          rm -rf stage
+          mkdir -p stage/StreamToShorts
+          ditto dist/StreamToShorts.app stage/StreamToShorts/StreamToShorts.app
+          cp docs/install/macos.txt "stage/StreamToShorts/READ ME FIRST.txt"
+
+          # The copy still has to be the app that was signed a step ago.
+          codesign --verify --deep --strict stage/StreamToShorts/StreamToShorts.app
+
           ditto -c -k --sequesterRsrc --keepParent \
-            dist/StreamToShorts.app StreamToShorts-macOS-arm64.zip
+            stage/StreamToShorts StreamToShorts-macOS-arm64.zip
           ls -lh StreamToShorts-macOS-arm64.zip
           shasum -a 256 StreamToShorts-macOS-arm64.zip
           echo "SHA256=$(shasum -a 256 StreamToShorts-macOS-arm64.zip | cut -d' ' -f1)" >> "$GITHUB_ENV"
@@ -411,6 +429,9 @@ jobs:
             fi
             echo ""
             echo "- \`StreamToShorts-macOS-arm64.zip\` — SHA-256 \`$SHA256\`"
+            echo "- Unzips to a **StreamToShorts** folder: the app, and"
+            echo "  \`READ ME FIRST.txt\` explaining the first launch it is about"
+            echo "  to be refused by."
             echo "- **Never run on a Mac.** What passed here is what a runner can"
             echo "  check — it builds, the version matches, the signature verifies,"
             echo "  the bundled ffmpeg runs. Nobody has opened the app."
@@ -665,17 +686,25 @@ jobs:
           echo "it served $(stat -c%s page.html) bytes of interface"
           echo "SHA256=$(sha256sum StreamToShorts-linux-x86_64 | cut -d' ' -f1)" >> "$GITHUB_ENV"
 
+      # A second file rather than an archive around the first. The updater
+      # downloads this asset, makes it executable and swaps it into place, so
+      # the binary has to stay exactly a binary -- wrapping it in a tarball to
+      # fit a readme inside would mean teaching the update path to unwrap one,
+      # on every future release, to solve a problem that a second file solves
+      # for nothing.
+      - name: Put the instructions next to it
+        run: cp docs/install/linux.txt StreamToShorts-linux-README.txt
+
       - name: Attach the build to this run instead
         if: steps.tag.outputs.publish != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: StreamToShorts-linux-x86_64
-          path: StreamToShorts-linux-x86_64
+          path: |
+            StreamToShorts-linux-x86_64
+            StreamToShorts-linux-README.txt
           retention-days: 7
 
-      # No archive around it. The updater downloads this asset, makes it
-      # executable and swaps it in, so anything wrapped around it would be one
-      # more thing for the update path to unwrap first.
       - name: Add it to the release
         if: steps.tag.outputs.publish == 'true'
         env:
@@ -685,8 +714,9 @@ jobs:
           # remotes. It cannot do that without git, and this repository has a
           # fork parent that gh reaches for first when it can.
           gh release upload "${{ steps.tag.outputs.name }}" \
-            StreamToShorts-linux-x86_64 --clobber \
-            -R "${{ github.repository }}"
+            StreamToShorts-linux-x86_64 \
+            StreamToShorts-linux-README.txt \
+            --clobber -R "${{ github.repository }}"
 
       - name: Summary
         run: |
@@ -709,6 +739,8 @@ jobs:
             echo "  blank window. Running from source with python3-gi installed"
             echo "  still gets a real window."
             echo "- \`chmod +x\` it and run it. It updates itself from then on."
+            echo "- \`StreamToShorts-linux-README.txt\` is the same instructions,"
+            echo "  published beside it — the binary cannot carry them itself."
             if [ "${{ steps.tag.outputs.publish }}" != "true" ]; then
               echo "- Attached to this run for 7 days. No release was created or touched."
             fi
