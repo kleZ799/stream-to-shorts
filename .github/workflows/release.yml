@@ -391,6 +391,17 @@ jobs:
           set -e
           rm -rf stage
           mkdir -p stage/StreamToShorts
+          need() {
+          if [ ! -f "$1" ]; then
+            echo "::error::$1 is missing from this checkout."
+            echo "::error::Rebuilding a tag from before it was added? The"
+            echo "::error::workflow comes from the branch and the code comes"
+            echo "::error::from the tag, so they can disagree about what exists."
+            exit 1
+          fi
+          }
+          need docs/install/macos.txt
+
           ditto dist/StreamToShorts.app stage/StreamToShorts/StreamToShorts.app
           cp docs/install/macos.txt "stage/StreamToShorts/READ ME FIRST.txt"
 
@@ -693,7 +704,19 @@ jobs:
       # on every future release, to solve a problem that a second file solves
       # for nothing.
       - name: Put the instructions next to it
-        run: cp docs/install/linux.txt StreamToShorts-linux-README.txt
+        run: |
+          set -e
+          need() {
+          if [ ! -f "$1" ]; then
+            echo "::error::$1 is missing from this checkout."
+            echo "::error::Rebuilding a tag from before it was added? The"
+            echo "::error::workflow comes from the branch and the code comes"
+            echo "::error::from the tag, so they can disagree about what exists."
+            exit 1
+          fi
+          }
+          need docs/install/linux.txt
+          cp docs/install/linux.txt StreamToShorts-linux-README.txt
 
       - name: Attach the build to this run instead
         if: steps.tag.outputs.publish != 'true'
