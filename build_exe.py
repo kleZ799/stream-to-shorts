@@ -6,10 +6,12 @@
 Output lands in dist/. On Windows that is a StreamToShorts folder, or a single
 StreamToShorts.exe with --onefile (slower to start, since it unpacks to a temp
 dir each launch, but the only build that can replace itself when an update
-arrives). On macOS it is StreamToShorts.app, a bundle you drag to Applications.
+arrives). On Linux it is those same two shapes without the extension. On macOS
+it is StreamToShorts.app, a bundle you drag to Applications.
 
-PyInstaller cannot cross-compile: a Windows build has to be made on Windows and
-a mac build on a Mac. The release workflow runs one of each.
+PyInstaller cannot cross-compile: a Windows build has to be made on Windows, a
+mac build on a Mac, and a Linux build on Linux. The release workflow runs one
+of each.
 
 Optional: drop ffmpeg and ffprobe into a ./bin folder before building and they
 get bundled, so users don't have to install ffmpeg themselves. Without them the
@@ -28,6 +30,7 @@ ROOT = Path(__file__).parent.resolve()
 NAME = "StreamToShorts"
 
 MAC = sys.platform == "darwin"
+LINUX = sys.platform.startswith("linux")
 
 # Reverse-DNS, because macOS identifies an app by this rather than by its name.
 # Two apps sharing one identifier confuse everything from window restoration to
@@ -211,6 +214,17 @@ def main() -> int:
         use_cuda = False
         if args.cuda:
             print("ignoring --cuda: no Mac has an NVIDIA card to run it on")
+    if LINUX and use_cuda:
+        # Linux cards are real; nothing here can reach them. The pip CUDA
+        # wheels drop their .so files under site-packages/nvidia/*/lib, and
+        # the dynamic linker reads LD_LIBRARY_PATH once, at exec -- so unlike
+        # Windows, where add_dll_directory fixes this from inside the running
+        # process, there is no moment at which those libraries can be made
+        # findable. Bundling them adds 2GB that CTranslate2 still cannot load.
+        use_cuda = False
+        if args.cuda:
+            print("ignoring --cuda: nothing can put bundled CUDA libraries on "
+                  "the library path of a process that has already started")
 
     # The updater compares the running build's APP_VERSION against the newest
     # release tag. If the version resource says one thing and APP_VERSION says
@@ -295,6 +309,25 @@ def main() -> int:
             "--collect-all", "objc",
             "--osx-bundle-identifier", BUNDLE_ID,
         ]
+    elif LINUX:
+        # Nothing. Windows and macOS each carry a webview in the operating
+        # system; Linux carries neither, and the one pywebview would use here
+        # is the one that cannot travel.
+        #
+        # WebKit2GTK is reached through PyGObject, whose typelibs and ~200
+        # shared libraries would all have to come along -- and even bundled
+        # they are only half of it, because WebKit renders pages in a separate
+        # WebKitWebProcess that it finds by a path compiled into the library
+        # at distribution build time. Get that wrong and the app opens a
+        # window that stays blank, which is worse than not opening one.
+        #
+        # So the packaged build does not try. desktop.py already falls back to
+        # the user's browser, which is a working app on every distribution
+        # rather than a native window on the one this was built for. Anyone
+        # running from source still gets a real window: there pywebview finds
+        # the system's own python3-gi, and none of this applies.
+        platform_args = []
+        print("no bundled webview — this build opens the user's browser")
     else:
         platform_args = [
             "--hidden-import", "webview.platforms.edgechromium",
@@ -321,6 +354,11 @@ def main() -> int:
 
     if MAC:
         icon = _mac_icon()
+    elif LINUX:
+        # --icon takes a .ico or an .icns and nothing else, and a Linux binary
+        # carries no icon of its own regardless: that lives in a .desktop
+        # file, which belongs to whoever installs the app, not to the build.
+        icon = None
     else:
         # Author and copyright, compiled into the exe's version resource. This
         # is what Properties -> Details shows, so a copy that has travelled
@@ -353,6 +391,10 @@ def main() -> int:
         rc = _finish_bundle(out)
         if rc != 0:
             return rc
+    elif LINUX:
+        # Neither shape has an extension, so both want the same name --
+        # whichever one this run asked for is what PyInstaller wrote there.
+        out = ROOT / "dist" / NAME
     else:
         out = ROOT / "dist" / (f"{NAME}.exe" if args.onefile else NAME)
 
