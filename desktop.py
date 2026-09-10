@@ -8,7 +8,8 @@ If a native webview isn't available it falls back to the default browser
 rather than failing, because a working browser window beats no app at all.
 
 Run from source:   python desktop.py
-Packaged:          StreamToShorts.exe, or StreamToShorts.app on a Mac
+Packaged:          StreamToShorts.exe, StreamToShorts.app on a Mac, or a bare
+                   StreamToShorts binary on Linux
 """
 import os
 import socket
@@ -120,6 +121,11 @@ def _alert(message: str, *, error: bool = True) -> None:
 
     The packaged build is windowed, so stderr goes nowhere a user will ever
     look. Anything worth printing on the way out is worth a dialog box.
+
+    Windows and macOS each have one that is always there. Linux has neither,
+    so the two most widely installed are tried and the absence of both is not
+    treated as a problem: the message has already reached app.log, and a
+    missing dialog costs the user a file to go and find, not the information.
     """
     print(message, file=sys.stderr if error else sys.stdout, flush=True)
 
@@ -140,6 +146,26 @@ def _alert(message: str, *, error: bool = True) -> None:
             )
         except Exception:
             pass    # a missing dialog must not become the reason we can't exit
+        return
+
+    if sys.platform.startswith("linux"):
+        import shutil
+        import subprocess
+
+        for tool, args in (
+            ("zenity", ["--error" if error else "--info",
+                        f"--title={APP_NAME}", f"--text={message}"]),
+            ("kdialog", ["--title", APP_NAME,
+                         "--error" if error else "--msgbox", message]),
+        ):
+            path = shutil.which(tool)
+            if not path:
+                continue
+            try:
+                subprocess.run([path, *args], timeout=300)
+            except Exception:
+                pass    # a missing dialog must not become the reason we can't exit
+            return
         return
 
     if sys.platform != "win32":
