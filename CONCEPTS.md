@@ -55,7 +55,8 @@ engineering is.
 > Everything runs locally except one LLM call. It ships as a desktop app for
 > Windows, macOS and Linux — a FastAPI server behind a native webview window,
 > or behind the browser on Linux, where that window cannot be bundled and
-> carried. Packaged with PyInstaller.
+> carried. Packaged with PyInstaller, and it raises a desktop notification
+> when a run finishes and nobody is watching it.
 >
 > The interesting parts aren't the models, they're everything around them:
 > a 3h47m VOD does not fit in a context window, so ranking is chunked and
@@ -912,6 +913,42 @@ shipped before it existed. Those installs are unreachable by construction and
 need one manual download. Worth stating plainly rather than discovering.
 
 ---
+
+## 12c. CS: absence as a signal
+
+**The problem.** A render finishes. Should the app interrupt you about it? Only
+if you are not already looking at it — and a server process cannot see its own
+window. Worse, the two states it has to distinguish look identical from inside:
+somebody watching the progress bar, and somebody who closed the window an hour
+ago and went to bed.
+
+**Why a flag does not work.** The obvious design is a boolean the page sets:
+`true` when it becomes visible, `false` when it is hidden. It fails on the case
+that matters most. A window that is closed, or a tab shut mid-render, never
+sends the `false`. It leaves a `true` behind, and the app stays quiet forever at
+exactly the moment it should speak.
+
+**Heartbeats.** The fix is to make the signal expire rather than persist. The
+page sends its state every twenty seconds whether or not anything changed, and
+the server treats a report older than forty-five seconds as no report at all.
+Presence has to be continuously renewed; absence is what happens by default,
+including when the reporter is no longer able to report anything.
+
+This is a lease. It is the same idea as a TTL on a cache entry, a lock lease in
+a distributed system, or TCP keepalive: rather than trusting a peer to announce
+that it has gone, assume it has gone unless it keeps saying otherwise. The
+reason is always the same — a peer that crashes cannot send its own obituary, so
+a system that needs to detect crashes must never ask peers to announce them.
+
+**The same mechanism, pointed both ways.** The SSE stream in section 7 sends a
+`: ping` comment every fifteen seconds for the mirror-image purpose: to stop a
+proxy concluding from silence that a live connection is dead. One heartbeat
+proves liveness; the other detects its absence. Identical machinery — the
+difference is entirely in what you do when the beats stop.
+
+**Where it lands in the code.** `webapp/notify.py` holds the lease and the
+three platform notifiers; `POST /api/attention` feeds it; the `finally` in
+`JobManager._run_forever` asks it one question, once, when a run has ended.
 
 ## 13. CS: internationalisation
 

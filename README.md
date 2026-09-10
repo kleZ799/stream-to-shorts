@@ -160,6 +160,23 @@ every update is the path that gets exercised.
 > Builds before v1.5.0 were compiled before any of this existed and cannot be
 > told about new versions. Those need one manual download — the last one.
 
+### It tells you when it's finished
+
+A long VOD is tens of minutes of work. Nobody watches that, so the window ends
+up behind a game or minimised — and until now the only way to learn the clips
+existed was to go back and look, which meant a run that finished at 2am was
+found at nine.
+
+When a run ends and you are not looking at the app, it raises a desktop
+notification: a toast on Windows, Notification Centre on a Mac, and whatever
+your desktop uses on Linux. When you *are* looking at it, it stays quiet,
+because a notification for something already on your screen is just noise. It
+knows which by asking the page every twenty seconds whether it is actually on
+screen — and a window that has been closed stops answering, which is the same
+answer.
+
+Failed runs say so too, and name what went wrong.
+
 ### Clips come back ranked
 
 Each card carries its score and the exact span it was cut from.
@@ -378,6 +395,11 @@ place — the same as Windows. The download above is the only one you do by hand
   runtime, which is the whole reason it gets the GPU and this does not.
 - **Files live in Linux places** — `~/Videos/StreamToShorts` for output,
   `~/.config/StreamToShorts` for settings, instead of `Videos` and `%APPDATA%`.
+- **Finished-run notifications need `notify-send`.** Most desktops have it
+  already, as part of `libnotify-bin`; KDE's `kdialog` is used instead when
+  that is what is installed. With neither, the app says so in its log and
+  carries on — Windows and macOS both have a notifier that is always there,
+  and Linux is the one platform where that cannot be assumed.
 - Everything else is the same app: same ranking, same layouts, same editing,
   same pause button. ffmpeg is bundled and statically linked, so it does not
   care what your distribution ships or whether it ships one at all.

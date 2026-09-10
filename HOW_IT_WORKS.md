@@ -2065,6 +2065,67 @@ once more.
 
 ---
 
+## 16c. Telling somebody a run has finished
+
+`webapp/notify.py`, called from one place: the `finally` in
+`JobManager._run_forever` that already clears the pause gate. Every run ends
+there — the ones that succeeded, the ones that raised, the ones that rendered
+nothing — so there is exactly one place that has to be right.
+
+### Why this exists
+
+A three-hour VOD is tens of minutes of transcribing, ranking and rendering.
+Nobody watches that. The window goes behind a game, or gets minimised, or the
+browser tab it opened ends up three deep — and the clips sit there finished
+with nothing to say so. The run that ended at 2am was found at nine.
+
+### Three platforms, no new dependency
+
+| | Mechanism | Arrives as |
+|---|---|---|
+| Windows | a toast, through PowerShell's WinRT bindings | Action Center, filed under Windows PowerShell |
+| macOS | `osascript -e 'display notification …'` | Notification Centre |
+| Linux | `notify-send`, or `kdialog --passivepopup` | whatever the desktop uses — on some, nothing |
+
+The Windows toast borrows PowerShell's own AppUserModelID. A toast needs an ID
+the shell already knows about, and an unsigned exe run from wherever it was
+downloaded to, with no Start Menu shortcut, has none to offer. The cost is the
+wrong name on the notification. The alternative was no notification.
+
+Every one of these is allowed to fail, and on Linux one regularly will: there
+is no notifier that is always installed, and a headless machine has nowhere to
+show one anyway. A notification that does not arrive is a disappointment; a
+render that died because a notification did not arrive would be a bug. So
+nothing in the module raises, the work happens on a daemon thread of its own so
+a cold PowerShell start cannot hold up the queue, and a failure is one line in
+the log naming the reason.
+
+The subprocess goes out with `proc.hidden_kwargs()`. A windowed build that
+flashes a black console every time a render finishes looks broken in exactly
+the way an unsigned exe can least afford — see 16a.
+
+### Knowing whether anybody is looking
+
+The harder half. The server cannot see its own window, and the two states it
+has to tell apart are indistinguishable from inside a process: somebody
+watching a render finish, and somebody who left an hour ago.
+
+So the page says. `POST /api/attention` carries one boolean —
+`!document.hidden && document.hasFocus()` — sent whenever that changes, and
+again every twenty seconds whether it changed or not.
+
+The heartbeat is the whole design. A flag would be wrong for the case that
+matters most: a window that was closed, or a tab shut mid-render, never gets to
+send `false`. It leaves a `true` behind and the app goes silent forever, at
+precisely the moment it should speak. Silence is the only signal such a page
+leaves, and only a heartbeat has any. So `someone_is_watching()` insists on
+both halves — a last report of `true`, **and** one that arrived inside
+forty-five seconds.
+
+It is the same mechanism as the SSE `: ping` in section 14, pointed the other
+way. There a heartbeat proves a connection is still alive; here its absence
+proves a window is not.
+
 ## 17. Rough edges and known limits
 
 Everything in this section is true of the code as it stands. An earlier draft of
@@ -2221,6 +2282,7 @@ rather than guessing from what the button last did.
 | `GET /api/jobs/{id}` | One job snapshot |
 | `GET /api/jobs/{id}/stream` | **SSE** — one event per state change, `: ping` every ~15s, closes on `done`/`error` |
 | `GET /api/library` | Every clip still on disk, rescanning the folder first |
+| `POST /api/attention` | The page reporting whether anyone is looking at it. A heartbeat, not a flag — silence counts as no, which is how a closed window is detected |
 
 ### Acting on clips
 
