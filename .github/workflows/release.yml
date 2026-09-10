@@ -495,14 +495,25 @@ jobs:
           ref: ${{ steps.tag.outputs.ref }}
           fetch-depth: 0
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-
-      - name: Install dependencies
+      # Not actions/setup-python. Its prebuilt interpreters are linked against
+      # glibc 2.38 now, so the one machine they cannot run on is the 22.04
+      # container that exists to hold the floor at 2.35 -- it dies on the first
+      # `python`, with the very error this container is here to spare users.
+      #
+      # uv's managed interpreters are python-build-standalone builds targeting
+      # glibc 2.17. Measured: the interpreter 2.17, libpython 2.17 -- that
+      # being exactly where setup-python's 2.38 came from -- and the wheels
+      # 2.34 at the highest. So nothing in the toolchain sets the floor, which
+      # leaves the container's own libraries setting it. That was the point.
+      - name: Python, and dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements-web.txt pyinstaller
+          set -e
+          curl -LsSf https://astral.sh/uv/install.sh             | env UV_INSTALL_DIR=/usr/local/bin sh
+          uv --version
+          uv venv --python 3.13 /opt/venv
+          uv pip install --python /opt/venv/bin/python             -r requirements-web.txt pyinstaller
+          echo "/opt/venv/bin" >> "$GITHUB_PATH"
+          /opt/venv/bin/python --version
 
       # Statically linked, which is the whole point: a distribution's own
       # ffmpeg links against that distribution's libraries, so bundling one
