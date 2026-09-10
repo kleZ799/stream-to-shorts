@@ -871,6 +871,27 @@ document.addEventListener("visibilitychange", () => {
   if (!document.hidden) checkUpdateQuietly();
 });
 
+// ------------------------------------------------------------- attention
+//
+// Tell the server whether anyone is actually looking at this, so a run that
+// finishes while nobody is raises a desktop notification and one that
+// finishes in front of you does not.
+//
+// Sent as a heartbeat rather than once per change, because the interesting
+// case is the window that went away without saying anything — closed, or a
+// browser tab shut mid-render. Silence is the signal there, and only a
+// heartbeat has any.
+function reportAttention() {
+  const watching = !document.hidden && document.hasFocus();
+  fetch("/api/attention", json("POST", { watching })).catch(() => {});
+}
+
+document.addEventListener("visibilitychange", reportAttention);
+window.addEventListener("focus", reportAttention);
+window.addEventListener("blur", reportAttention);
+setInterval(reportAttention, 20 * 1000);
+reportAttention();
+
 openWelcome();
 
 // ---------------------------------------------------------------- source

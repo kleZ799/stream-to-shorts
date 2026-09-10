@@ -32,6 +32,7 @@ from shorts_generator import proc
 from shorts_generator.layout_spec import LayoutSpec
 
 from shorts_generator import user_config
+from . import notify
 
 # Written into each job's folder so the run can be reconstructed later.
 MANIFEST_NAME = "job.json"
@@ -549,7 +550,45 @@ class JobStore:
                 # or the next one starts and immediately blocks on a pause
                 # nobody can see or lift.
                 proc.clear()
+                self._announce(job)
                 self._queue.task_done()
+
+    def _announce(self, job: Job) -> None:
+        """Raise a desktop notification for a run that has just ended.
+
+        This is the only moment in the app worth interrupting somebody for. A
+        VOD takes tens of minutes, nobody watches that, and until now the only
+        way to learn the clips existed was to go back and check -- which means
+        the ones finished at 2am were found at 9.
+
+        Silent when the app is on screen, because a notification for something
+        already visible is noise. notify decides that; this only decides what
+        it would say.
+
+        Whatever happens here, the job is over and the queue moves on: it runs
+        inside the finally that also clears the pause gate.
+        """
+        try:
+            with self._lock:
+                status, message, error = job.status, job.message, job.error
+                source = job.source_title
+
+            if status == "done":
+                title = message or "Your clips are ready"
+            elif status == "error":
+                title = "That run did not finish"
+                message = error or message
+            else:
+                return          # never started, or cancelled: nothing to say
+
+            body = source or message or ""
+            if status == "error" and source:
+                body = f"{source} — {message}" if message else source
+
+            if notify.send_if_away(title, body):
+                print(f"[notify] {title}", flush=True)
+        except Exception as e:  # noqa: BLE001 - a finished run stays finished
+            print(f"[notify] skipped ({e.__class__.__name__}: {e})", flush=True)
 
     def _execute(self, job: Job) -> None:
         from shorts_generator.boundaries import report as report_cuts

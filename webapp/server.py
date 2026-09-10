@@ -22,7 +22,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from shorts_generator.layout_spec import ASPECT_PRESETS, LayoutSpec, parse_layout_prompt
-from . import updater
+from . import notify, updater
 from .jobs import STORE, regenerate_seo, rename_to_title
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -445,6 +445,27 @@ def _open_in_file_manager(target: Path) -> None:
         # the next best thing.
         subprocess.run(["xdg-open", str(target if not is_file else target.parent)],
                        check=True)
+
+
+class AttentionRequest(BaseModel):
+    watching: bool = False
+
+
+@app.post("/api/attention")
+async def attention(req: AttentionRequest) -> dict:
+    """The page reporting whether anybody is actually looking at it.
+
+    A heartbeat rather than a switch. It arrives every twenty seconds while the
+    app is on screen and focused, and immediately when that stops being true.
+
+    A run that finishes raises a desktop notification only when these have gone
+    quiet, or last said no — which is also exactly what a closed window looks
+    like from in here, because a page that is gone stops reporting. That is the
+    point: there is no other way for the server to tell the difference between
+    somebody watching a render and somebody who left an hour ago.
+    """
+    notify.mark_watching(req.watching)
+    return {"ok": True}
 
 
 @app.post("/api/reveal")

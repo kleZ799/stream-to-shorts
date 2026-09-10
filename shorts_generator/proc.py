@@ -50,6 +50,16 @@ def _hidden(kwargs: dict) -> dict:
     return kwargs
 
 
+def hidden_kwargs(**kwargs) -> dict:
+    """Popen keyword arguments that keep a console program windowless.
+
+    The same flags silence_console_windows() applies wholesale, for callers
+    that want them on one specific call rather than on everything. Harmless
+    and empty off Windows.
+    """
+    return _hidden(kwargs)
+
+
 _patched = False
 
 
