@@ -161,8 +161,12 @@ def _is_daily_quota(msg: str) -> bool:
     return "perday" in lowered.replace("_", "") or "per day" in lowered
 
 
-def call_gemini_llm(prompt: str) -> str:
-    """Gemini backend used by --mode local when LLM_PROVIDER=gemini."""
+def call_gemini_llm(prompt: str, contents: Optional[list] = None) -> str:
+    """Gemini backend used by --mode local when LLM_PROVIDER=gemini.
+
+    `contents`, when given, is sent instead of `prompt` -- a list of text and
+    image parts, for the calls that have to look at frames.
+    """
     try:
         from google import genai  # type: ignore
     except ImportError as e:
@@ -199,7 +203,8 @@ def call_gemini_llm(prompt: str) -> str:
     for attempt in range(attempts):
         try:
             response = client.models.generate_content(
-                model=model, contents=prompt, config=config
+                model=model, contents=contents if contents is not None else prompt,
+                config=config,
             )
             break
         except Exception as e:
@@ -298,6 +303,88 @@ def _next_provider(why: str) -> Optional[str]:
 def _switch_to_openai(why: str) -> None:
     # Kept as the old name for callers outside this module.
     _switch_to("openai", why)
+
+
+# Groq's text model cannot see. This one can, and takes at most five images
+# per request, which is why the vision batch size asks who it is talking to.
+GROQ_VISION_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
+_IMAGES_PER_REQUEST = {"gemini": 20, "openai": 20, "groq": 5}
+
+
+def _as_gemini_parts(parts: list) -> list:
+    from google.genai import types  # type: ignore
+    return [p if isinstance(p, str) else types.Part.from_bytes(data=p[0], mime_type=p[1])
+            for p in parts]
+
+
+def _as_openai_content(parts: list) -> list:
+    import base64
+    out = []
+    for p in parts:
+        if isinstance(p, str):
+            out.append({"type": "text", "text": p})
+        else:
+            data = base64.b64encode(p[0]).decode("ascii")
+            out.append({"type": "image_url", "image_url": {"url": f"data:{p[1]};base64,{data}"}})
+    return out
+
+
+def _openai_compatible_vision(parts: list, provider: str) -> str:
+    from openai import OpenAI  # type: ignore
+    if provider == "groq":
+        client, model = OpenAI(api_key=require_groq_key(), base_url=GROQ_BASE_URL), GROQ_VISION_MODEL
+    else:
+        client, model = OpenAI(api_key=require_openai_key()), current_model("openai")
+    response = client.chat.completions.create(
+        model=model,
+        temperature=0.1,
+        response_format={"type": "json_object"},
+        messages=[{"role": "user", "content": _as_openai_content(parts)}],
+    )
+    usage.record(provider, model)
+    return response.choices[0].message.content or ""
+
+
+def _gemini_is_configured() -> bool:
+    try:
+        return bool(require_gemini_key()) and not usage.is_exhausted("gemini", current_model("gemini"))
+    except RuntimeError:
+        return False
+
+
+def vision_images_per_request() -> int:
+    """How many frames one vision request may carry on the provider in use."""
+    return _IMAGES_PER_REQUEST.get(_fallback_provider or current_provider(), 5)
+
+
+def call_vision_llm(parts: list) -> str:
+    """Ask a model that can see about text and images together.
+
+    `parts` is a list of strings and (bytes, mime type) images, in order. The
+    provider in use is asked first, then any other configured one -- looking
+    at a clip is worth one failover, since the alternative is a title written
+    blind -- and a provider that cannot take this many images is skipped.
+    """
+    images = sum(1 for p in parts if not isinstance(p, str))
+    first = _fallback_provider or current_provider()
+    order = [first] + [p for p in ("gemini", "openai", "groq") if p != first]
+    configured = {"gemini": _gemini_is_configured, "openai": _openai_is_configured,
+                  "groq": _groq_is_configured}
+    last: Optional[Exception] = None
+    for name in order:
+        if not configured.get(name, lambda: False)():
+            continue
+        if images > _IMAGES_PER_REQUEST[name]:
+            continue
+        try:
+            if name == "gemini":
+                return call_gemini_llm("", contents=_as_gemini_parts(parts))
+            return _openai_compatible_vision(parts, name)
+        except Exception as e:
+            last = e
+            print(f"[vision] {name} could not look at the frames "
+                  f"({str(e).splitlines()[0][:100]})", flush=True)
+    raise last or RuntimeError("no provider that can look at images is configured")
 
 
 def reset_fallback() -> None:
