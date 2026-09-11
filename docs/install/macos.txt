@@ -101,8 +101,9 @@ WHAT IS DIFFERENT FROM THE WINDOWS BUILD
     M-series CPU does all of it. It works; a long VOD takes a while.
 
   - Video encoding does use the Mac's GPU, through Apple's VideoToolbox,
-    once a one-second test encode proves it works. Settings -> Processor
-    shows what each stage is using, and "CPU only" turns the GPU off.
+    once a one-second test encode proves it works. The Processor box, under
+    the live preview on the Create page, shows what each stage is using, and
+    "CPU only" turns the GPU off.
 
   - Apple Silicon only -- an M1 or later. There is no Intel build.
 

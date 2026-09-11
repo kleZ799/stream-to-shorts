@@ -845,7 +845,9 @@ The setting is `PROCESSOR` — `auto` (the default: whatever works fastest),
 touch one) — read live through `config.current_processor()`, so a change made
 while a run is paused applies from the next clip. `LOCAL_WHISPER_DEVICE`, the
 older developer knob, still outranks it for transcription when set. The
-Settings panel reads `GET /api/processor`; while a run is paused and the encoder
+Processor box under the live preview reads `GET /api/processor` when the page
+opens and again after every run, and "Check again" re-runs the encoder tests
+for someone who has just installed a driver; while a run is paused and the encoder
 has never been probed, it reports it as unknown rather than starting a test
 encode that would wait on the pause.
 
@@ -1642,10 +1644,10 @@ Reads `/api/settings` and `/api/usage` to render:
   choice is made with the number in view.
 - **Budget meters** — requests used today vs the daily cap, and time until reset
 - Save-location picker and the disk cleanup scanner
-- **Processor** — Automatic, GPU or CPU only, with what video encoding and
-  transcription will actually run on and why, read from `GET /api/processor`
-  each time the drawer opens ([§7.5](#75-which-processor--accelpy)). "Check
-  again" re-runs the encoder tests, for someone who has just installed a driver
+
+The Processor choice is deliberately *not* here. It decides how fast the render
+about to be started will be, so it lives with the render: under the live
+preview on the Create page ([§7.5](#75-which-processor--accelpy)).
 
 If a setting is pinned by an environment variable, the API reports
 `provider_pinned` / `model_pinned` and the UI says so — the difference between a

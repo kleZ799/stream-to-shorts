@@ -70,9 +70,9 @@ A GPU is used where one really works, and never required. Video is encoded
 on the graphics chip when the bundled ffmpeg can drive yours and a one-second
 test encode passes; otherwise on the CPU. Transcription uses an NVIDIA GPU
 only if NVIDIA's CUDA libraries (libcublas.so.12, libcudnn.so.9) are installed
-on the system -- the file does not carry them, they are about 2 GB. Settings ->
-Processor shows what each stage is using and why, and "CPU only" turns the GPU
-off if a driver misbehaves.
+on the system -- the file does not carry them, they are about 2 GB. The
+Processor box under the live preview shows what each stage is using and why,
+and "CPU only" turns the GPU off if a driver misbehaves.
 
 
 IT OPENS YOUR BROWSER, NOT A WINDOW

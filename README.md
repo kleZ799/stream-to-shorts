@@ -100,7 +100,8 @@ transcription and face tracking too, on the CPU or the GPU.
 
 ### Use the GPU — or don't
 
-**Settings → Processor** decides what does the heavy work: **Automatic** (the
+**Processor**, right under the live preview on the Create page, decides what
+does the heavy work: **Automatic** (the
 fastest thing this computer really has), **GPU**, or **CPU only**.
 
 On Automatic, video is encoded on the graphics chip — NVIDIA, Intel, AMD or a
@@ -111,7 +112,7 @@ failing, and the panel says in plain words what is being used and why. If a
 graphics driver keeps misbehaving, **CPU only** never touches it. The choice
 applies from the next clip, even on a paused run.
 
-<img src="assets/screenshots/06-processor.png" alt="Settings, Processor section: Automatic selected, video encoding on the NVIDIA GPU (NVENC), transcription on the NVIDIA GPU (CUDA)" width="880">
+<img src="assets/screenshots/06-processor.png" alt="The Processor box under the live preview: Automatic selected, video encoding on the NVIDIA GPU (NVENC), transcription on the NVIDIA GPU (CUDA)" width="880">
 
 ### Your clips folder is readable
 
@@ -890,7 +891,7 @@ The knobs that change output quality most, in order:
 | `FRAMES_PER_CLIP` | `shorts_generator/vision.py` | Frames shown to the vision model per clip, `4` by default |
 | `TITLE_OPTIONS` | `shorts_generator/seo.py` | Titles written per clip for you to choose from, `5` by default |
 | `STAGE_ATTEMPTS` / `CLIP_ATTEMPTS` | `webapp/jobs.py` | How many times a stage, or one clip's render, is tried before a run gives up, `3` each |
-| Processor | Settings, or `PROCESSOR` in `.env` | `auto` (default), `gpu` or `cpu` — what encodes video and runs transcription. `LOCAL_WHISPER_DEVICE`, if set, still pins transcription |
+| Processor | Under the live preview, or `PROCESSOR` in `.env` | `auto` (default), `gpu` or `cpu` — what encodes video and runs transcription. `LOCAL_WHISPER_DEVICE`, if set, still pins transcription |
 | `SCORE_THRESHOLD` | `shorts_generator/faces.py` | How sure YuNet must be to count a face, `0.7`. Raise it if a crop keeps catching faces in the game |
 | Provider | Settings | Gemini, Groq or OpenAI. Add a **free Groq key** as a fallback so a busy Gemini cannot end a run |
 | `LOCAL_WHISPER_MODEL` | `.env` | `base` is plenty for ranking. `small` reads better and hallucinates less — and on a GPU it is *faster* than `base`, so use it if you have one |
