@@ -88,7 +88,7 @@ Transcribes the audio locally with faster-whisper, then ranks every moment for
 what actually travels: hooks, revelations, opinion bombs, story peaks. You get
 told which stage it's on, because a three-hour VOD is not a two-second wait.
 
-<img src="assets/screenshots/02-progress.png" alt="A job mid-run, transcribing at 42%, with the log open" width="880">
+<img src="assets/screenshots/02-progress.png" alt="A job mid-run, rendering its clips, with the log open showing the webcam overlay being located" width="880">
 
 ### Pause it when you need your machine back
 
@@ -181,7 +181,7 @@ Failed runs say so too, and name what went wrong.
 
 Each card carries its score and the exact span it was cut from.
 
-<img src="assets/screenshots/03-clips.png" alt="Four finished clips in a grid, each with a score and timestamps" width="880">
+<img src="assets/screenshots/03-clips.png" alt="Finished clips in a grid, each with its rank, score, length, the game it is filed under, and its title" width="880">
 
 ### The title knows what is on screen
 
@@ -202,6 +202,8 @@ plus a ranked list of tags to tap in and out. All of it is editable, and
 **Save changes** keeps your wording — the mp4 on your PC is renamed to match
 the new title, so what is in the folder is always what goes into YouTube's
 title box.
+
+<img src="assets/screenshots/05-boost.png" alt="The Boost panel on a Firewatch clip: what the clip is filed under, the chosen title, and five ranked title options with their scores and angles" width="880">
 
 ### When something fails, it tries again
 
@@ -236,7 +238,7 @@ rendered file.
 
 ## Get it
 
-[**⬇ Download StreamToShorts.exe**](https://github.com/kleZ799/stream-to-shorts/releases/latest/download/StreamToShorts.exe) — 219 MB, Windows, self-contained.
+[**⬇ Download StreamToShorts.exe**](https://github.com/kleZ799/stream-to-shorts/releases/latest/download/StreamToShorts.exe) — 220 MB, Windows, self-contained.
 
 [**⬇ Download StreamToShorts-macOS-arm64.zip**](https://github.com/kleZ799/stream-to-shorts/releases/latest/download/StreamToShorts-macOS-arm64.zip) — 165 MB, Apple Silicon. **Beta.**
 
