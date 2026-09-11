@@ -131,22 +131,32 @@ jobs:
           # noticing and re-running by hand. The mac job has always used
           # `curl --retry 3`; this is the same idea, backing off further each
           # time so a host that is briefly overloaded gets a real chance.
+          #
+          # A download that "succeeds" is not yet an archive, either: the
+          # v1.11.0 Linux build got a normal response whose body was an error
+          # page, and died unpacking it. So unpacking is part of the attempt --
+          # an archive that will not open, or has no ffmpeg.exe in it, is
+          # thrown away and fetched again like any other failure.
           $url = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
           $ok = $false
           foreach ($attempt in 1..5) {
             try {
               Write-Host "downloading $url (attempt $attempt of 5)"
               Invoke-WebRequest -Uri $url -OutFile ffmpeg.zip -UseBasicParsing
+              Expand-Archive ffmpeg.zip -DestinationPath ffmpeg-tmp -Force
+              if (-not (Get-ChildItem ffmpeg-tmp -Recurse -Filter ffmpeg.exe)) {
+                throw "the archive has no ffmpeg.exe in it"
+              }
               $ok = $true
               break
             } catch {
               $why = $_.Exception.Message -split "`n" | Select-Object -First 1
               Write-Host "  failed: $why"
+              Remove-Item ffmpeg.zip, ffmpeg-tmp -Recurse -Force -ErrorAction SilentlyContinue
               if ($attempt -lt 5) { Start-Sleep -Seconds (15 * $attempt) }
             }
           }
-          if (-not $ok) { throw "could not download ffmpeg after 5 attempts" }
-          Expand-Archive ffmpeg.zip -DestinationPath ffmpeg-tmp
+          if (-not $ok) { throw "could not download a working ffmpeg after 5 attempts" }
           New-Item -ItemType Directory -Force -Path bin | Out-Null
           Get-ChildItem ffmpeg-tmp -Recurse -Include ffmpeg.exe, ffprobe.exe |
             ForEach-Object { Copy-Item $_.FullName -Destination bin }
@@ -303,10 +313,26 @@ jobs:
       - name: Fetch ffmpeg
         run: |
           mkdir -p bin
+          # curl --retry only retries what looks like a failure. A host that
+          # answers with an error page instead of the file looks like success
+          # -- that is what killed the v1.11.0 Linux build -- so every attempt
+          # is tested as a zip before it counts, and fetched again if not.
           fetch() {
             name="$1"; url="$2"
-            echo "downloading $url"
-            curl -fsSL --retry 3 --retry-delay 5 -o "$name.zip" "$url"
+            for attempt in 1 2 3 4 5; do
+              echo "downloading $url (attempt $attempt of 5)"
+              if curl -fsSL --retry 3 --retry-delay 5 -o "$name.zip" "$url" \
+                 && unzip -tq "$name.zip" > /dev/null; then
+                break
+              fi
+              echo "  not a usable archive"
+              rm -f "$name.zip"
+              if [ "$attempt" -eq 5 ]; then
+                echo "::error::could not download a working $name from $url after 5 attempts"
+                exit 1
+              fi
+              sleep $((15 * attempt))
+            done
             rm -rf ffmpeg-tmp && mkdir ffmpeg-tmp
             unzip -oq "$name.zip" -d ffmpeg-tmp
             found=$(find ffmpeg-tmp -type f -name "$name" | head -1)
@@ -567,8 +593,28 @@ jobs:
         run: |
           set -e
           mkdir -p bin
-          curl -fsSL --retry 5 --retry-delay 10 -o ffmpeg.tar.xz \
-            https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz
+          # curl --retry only retries what looks like a failure. The v1.11.0
+          # build got a response whose body was not an archive -- this host
+          # briefly serving an error page -- and died in tar, with the Windows
+          # and mac builds already published. So each attempt is tested as a
+          # whole xz archive before it counts, and fetched again if not.
+          url=https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz
+          ok=""
+          for attempt in 1 2 3 4 5; do
+            echo "downloading $url (attempt $attempt of 5)"
+            if curl -fsSL --retry 3 --retry-delay 10 -o ffmpeg.tar.xz "$url" \
+               && xz -t ffmpeg.tar.xz; then
+              ok=1
+              break
+            fi
+            echo "  not a usable archive: $(head -c 200 ffmpeg.tar.xz 2>/dev/null | tr -dc '[:print:]' | head -c 80)"
+            rm -f ffmpeg.tar.xz
+            if [ "$attempt" -lt 5 ]; then sleep $((20 * attempt)); fi
+          done
+          if [ -z "$ok" ]; then
+            echo "::error::could not download a working ffmpeg archive after 5 attempts"
+            exit 1
+          fi
           mkdir -p ffmpeg-tmp
           tar -xf ffmpeg.tar.xz -C ffmpeg-tmp
           for tool in ffmpeg ffprobe; do
