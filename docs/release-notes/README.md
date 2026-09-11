@@ -56,3 +56,27 @@ builds, that the version and signature are right, that ffmpeg survived
 bundling, and — on Linux only — that the app starts and serves its interface.
 What it cannot prove: that the app opens on a real Mac, or that a real Linux
 desktop behaves like the container it was built in.
+
+## Rebuilding a tag
+
+When one platform fails after the others have published — usually a download
+host having a bad minute — rebuild the tag rather than cutting a new version.
+
+**Re-running the failed job is only enough if the workflow itself is fine.** A
+re-run of a tag-push run uses the workflow file *as it was at that tag*, so a
+fix pushed to `main` since is ignored. To build a tag with the current
+workflow, run Release by hand from `main`, give it the tag, and leave dry run
+unticked:
+
+```bash
+gh workflow run Release -R kleZ799/stream-to-shorts --ref main -f tag=v1.11.1
+```
+
+It checks out the tag's code, builds all three, and replaces the release's
+files in place (`--clobber`) — the same version, so nobody is offered an update
+twice. (`-R` matters: without it `gh` reaches for the fork parent this repo was
+forked from.)
+
+Every ffmpeg download in the workflow is bounded, checked to be a real archive
+and retried five times, so the usual cause — a host serving an error page, or a
+transfer that stalls — is normally retried away before a job fails at all.

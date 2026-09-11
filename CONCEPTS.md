@@ -88,9 +88,11 @@ YouTube URL ──yt-dlp──> source.mp4 ──ffmpeg──> 16kHz mono audio
                                                      │
                                      greedy overlap dedupe → top N
                                                      │
-                                        LLM writes SEO metadata
+                         vision LLM looks at 4 frames per clip ──> what it shows
                                                      │
-                              OpenCV finds the face ──> crop geometry
+                              LLM writes 5 ranked titles, tags, description
+                                                     │
+                 OpenCV finds the overlay and the face ──> crop geometry
                                                      │
                                     ffmpeg: cut + stack + scale
                                                      │
@@ -1105,8 +1107,19 @@ comparable, so the global top-N is an approximation. See
 **"What happens when the API fails?"**
 Layered: retry with exponential backoff (8 attempts, ~4 min), then provider
 fallback, then graceful degradation to non-LLM metadata, and checkpointing so
-partial work survives regardless. Then tell them what degradation *cost* —
-the Korean title — because that shows you followed it through.
+partial work survives regardless. Around all of that, each pipeline stage
+retries itself, and a run that still fails can be sent round again — which
+resumes from its caches, because the stages were built to be idempotent. Then
+tell them what degradation *cost* — the Korean title — because that shows you
+followed it through.
+
+**"How does it know which game is in a clip?"**
+It looks: four frames per clip go to a vision model. The interesting part is
+what it does *not* trust. The model named a Fears to Fathom clip Phasmophobia
+at confidence 1.0 — model confidence is not calibrated — so the code asks for
+the *evidence* instead (text on screen, speech, the listing) and demotes any
+name without it to a guess. An unnamed clip is filed by genre; a misnamed one
+is called out in its own comments.
 
 **"What was the hardest bug?"**
 The GPU one is the best story: three independent silent failures stacked
@@ -1170,6 +1183,17 @@ Ordered by value, with the reasoning that makes each defensible:
 
 5. **Jitter on the retry backoff**, and Credential Manager for the API key.
    Both small, both known gaps.
+
+6. **A learned face detector.** Haar is why the stacked layout needs twenty
+   frames and a vote, and why the face crop falls back to a profile cascade.
+   YuNet — a ~300 KB model OpenCV runs natively — is far better on profiles,
+   shadow and headsets. The cost is one model file in every build; the
+   tradeoff that justified Haar at the start has shifted now that the vision
+   pass already sends frames to a model anyway.
+
+7. **Rank titles against outcomes too.** Title options are scored by a rubric
+   and a code check, both assumed. The same retention data as item 3 would say
+   which *angle* actually travels for this channel.
 
 ---
 

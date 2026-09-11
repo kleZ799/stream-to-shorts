@@ -64,12 +64,13 @@ produces a set of ranked vertical clips ready to upload as YouTube Shorts,
 Reels or TikToks, each with a title, description and tags written for it.**
 
 It downloads the source with **yt-dlp**, transcribes it locally with
-**faster-whisper**, sends the transcript to an **LLM (Gemini or OpenAI)** with a
-prompt tuned to find moments that travel, dedupes and scores the results, then
-renders the winners with **ffmpeg + OpenCV** into 9:16 video. It ships as a
-**FastAPI** backend behind a **vanilla-JS** single-page UI, wrapped in a native
-**pywebview** window and packaged by **PyInstaller** into a single Windows .exe
-that needs nothing installed.
+**faster-whisper**, sends the transcript to an **LLM (Gemini, Groq or OpenAI)**
+with a prompt tuned to find moments that travel, dedupes and scores the results,
+shows **frames from each winner to a vision model** so its title names what is
+actually on screen, then renders the winners with **ffmpeg + OpenCV** into 9:16
+video. It ships as a **FastAPI** backend behind a **vanilla-JS** single-page UI,
+wrapped in a native **pywebview** window and packaged by **PyInstaller** into a
+Windows .exe, a mac .app and a Linux binary that need nothing installed.
 
 The whole thing runs on the user's own machine. The only data that leaves is the
 transcript text sent to the ranking model — and even that is skipped when the
@@ -132,9 +133,10 @@ Two fixes, and they are the two most interesting parts of the codebase:
 | Request validation | **Pydantic** `BaseModel` | Declarative request schemas; malformed JSON is rejected before any handler runs |
 | Video download | **yt-dlp** | Actively maintained, handles YouTube's format churn, supports flat metadata-only extraction for channel listing |
 | Transcription | **faster-whisper** (CTranslate2) | 4× faster than reference Whisper, runs int8 on CPU, no cloud round trip, no upload |
-| LLM | **Google Gemini** (`google-genai`) / **OpenAI** | Gemini's free tier makes the app free to run; OpenAI is the paid fallback |
+| LLM | **Google Gemini** (`google-genai`) / **Groq** / **OpenAI** | Gemini's free tier makes the app free to run; Groq is a free fallback with capacity of its own, OpenAI the paid one |
+| Scene understanding | the same providers' **vision models** | Four frames per clip say which game is on screen — or that it is a podcast — with no model of our own to ship |
 | Video processing | **ffmpeg** (subprocess) | Single-pass filter graphs do crop/scale/stack without touching frames in Python |
-| Computer vision | **OpenCV** (Haar cascades) | Face detection with no model download and no GPU requirement |
+| Computer vision | **OpenCV** (Haar cascades) + **NumPy** | Face detection with no model download and no GPU requirement; overlay borders from statistics over a stack of frames |
 | Frontend | **Vanilla JS + CSS**, no framework | Zero build step, ~3.5k lines total, ships as three static files inside the exe |
 | Live updates | **Server-Sent Events** | One-directional server→client is exactly the shape of progress reporting; simpler than WebSockets |
 | Desktop shell | **pywebview** (Edge WebView2) | A native window with no address bar, using a browser engine Windows already has |
@@ -157,7 +159,9 @@ which is well inside what vanilla DOM handles cleanly.
 graphs (`crop → scale → vstack`) that ffmpeg executes in one pass with zero
 frames crossing into Python. That is the difference between clips rendering in
 seconds and rendering in minutes. The one renderer that *does* touch frames in
-Python (`facetrack`) is ~20× slower, which the UI warns about explicitly.
+Python (`facetrack`) decodes every frame to plan its camera path, and is about
+9× slower than a plain crop — 91s against 10s for 30 seconds of a 720p60
+stream — which the UI warns about explicitly.
 
 ---
 
@@ -782,8 +786,11 @@ Fixes that carried over, each of which once produced an opaque failure:
   handle closes, and a real encoding error otherwise surfaces as a confusing
   `WinError 32` from the cleanup path.
 
-This mode is **~20× slower** than the other two, and `LayoutSpec.warning()` says
-so in the UI before the user commits to a long render.
+Measured on 30 seconds of a 720p60 stream: **91s**, against 10s for the centre
+crop and 13s for the stacked layout — about **9× slower**, because every frame
+is still decoded to find the face, even though only eight a second are
+searched. `LayoutSpec.warning()` says so in the UI before the user commits to a
+long render.
 
 ### 7.4 `center` — plain centre crop
 
@@ -1495,6 +1502,14 @@ path runs once.
 **Existing clips stay on screen while a new run works** — the results grid isn't
 cleared on submit.
 
+**A failed run offers to go again.** `finish()` calls `offerRetry()`, which
+reads the snapshot's `failed` and `source_on_disk`: a run that ended in error
+shows **Try again**, and a finished run with clips missing shows **Retry failed
+clips**. Either one posts to `/api/jobs/{id}/retry` and hands the same id to
+`follow()` — the function every new run goes through too — so a retried job
+streams exactly like a fresh one. See
+[§11.5b](#115b-trying-again--by-itself-then-on-request).
+
 ### 12.6 Searching the library
 
 A library built up over weeks needs a way in that isn't scrolling. The search box
@@ -1527,8 +1542,19 @@ re-cut returns.
 The **mini player** persists as you scroll away, and an `IntersectionObserver`
 drives the guide rail's active-section highlight.
 
-The **SEO panel** ("Boost") shows the generated title, description, hashtags and
-tags with copy buttons, a "Rewrite" action (`?force=true`), and copy-everything.
+The **SEO panel** ("Boost") leads with **What's in this clip**: the kind of
+video and genre from the clip's `scene`, what it was filed under and on what
+evidence, and a box to type the real name — saved as `subject_override`, and
+used by every rewrite after. Under the title box, `title_options` are listed
+best first with their score and angle; tapping one fills the title box and
+arms Save, so an option can be tweaked before it is kept. Under the tags,
+every entry in `tag_options` is a chip that toggles itself in and out of the
+tag box, with YouTube's 500-character count beside them — the chips and the box
+are one list seen two ways, so typing in the box relights the chips. **Rewrite**
+rewrites just this clip (`?only={file}`), saving a typed subject first so the
+rewrite does not file the clip under the very guess it was meant to correct.
+Copy buttons and copy-everything as before. The clip cards in the grid show
+what each clip is filed under, so a wrong label is visible before upload.
 
 ### 12.8 Settings drawer
 
@@ -1797,8 +1823,20 @@ everything PyInstaller's static analysis can't see:
 `webview.platforms.edgechromium`, `faster_whisper`, `ctranslate2`, `cv2`,
 `google.genai`, `yt_dlp`, and the uvicorn loop/protocol/lifespan modules.
 `torch`, `matplotlib`, `tkinter` and `pytest` are excluded to keep size down
-(219 MB with ffmpeg, 153 MB without). The webview backend is the one hidden
+(220 MB with ffmpeg, 153 MB without). The webview backend is the one hidden
 import that differs per platform, and each is unavailable on the others.
+
+**Where `./bin` comes from on a release.** Each release job downloads a static
+ffmpeg for its own platform — from gyan.dev, osxexperts.net and
+johnvansickle.com — which makes three small hosts the only things standing
+between a pushed tag and a release. So every fetch is **bounded** (30s to
+connect, ten minutes in all, and a stall under 100 KB/s for a minute counts as
+a failure), **tested as a real archive** before it counts (`xz -t`, `unzip -t`,
+or unpacking and finding `ffmpeg.exe`), and **retried** five times with a
+growing wait. Both halves came from real failures: v1.11.0's Linux build died
+in `tar` on an error page served in place of the archive — which curl's own
+`--retry` never saw, because the response looked like success — and v1.11.1's
+sat for forty minutes on a transfer that had stalled without failing.
 
 ### What changes on a Mac
 
@@ -2349,6 +2387,29 @@ same step, so the app itself never loses track.
 
 Kept because the failure modes are instructive.
 
+**The face-tracking crop stuttered.** It detected a face on every frame and
+eased 15% of the way toward each new box. That reads as smooth on paper; on
+screen, Haar boxes wobble by several pixels between identical frames and a
+false positive yanks the window, so the crop never stopped moving. Measured on
+a real face cam: 50 direction reversals in 20 seconds. The path is now planned
+offline — median filter, dead zone, zero-lag Gaussian — and reverses 4 times.
+The lesson: an online filter over a noisy signal inherits the noise as motion;
+when the whole signal is known in advance, smooth it as a whole.
+[§7.3](#73-facetrack--the-talking-head-crop).
+
+**The stacked layout cropped whatever face was biggest.** On a real VOD it
+framed a baby's photo inside the game instead of the streamer, and wherever
+the overlay was smaller than five face-widths the cam panel filled with
+gameplay and letterbox bars. It now samples eight minutes around the clip,
+takes the face the samples agree on, and fits the crop inside a border found
+from persistent edges. [§7.2](#72-stacked--the-webcam-over-gameplay-layout).
+
+**A variety stream's clips were all filed under one game.** The subject was
+named once per run, from the listing, so a stream titled after The Finals
+tagged its Firewatch clips `#thefinals`. Each clip is now looked at, and a game
+is named only on evidence — the vision model called a Fears to Fathom clip
+Phasmophobia at full confidence. [§9](#9-seo-the-packaging-step).
+
 **Transcripts were cached against the working directory, not the video.** The
 cache path came from `LOCAL_OUTPUT_DIR`, which is relative and so resolved
 against the cwd, while the video was written under `OUTPUT_ROOT`. Identical by
@@ -2481,8 +2542,9 @@ Short answers to the questions you'll actually be asked.
 **"What does it do?"**
 Turns a long video into ranked vertical Shorts with upload-ready titles,
 descriptions and tags. Downloads with yt-dlp, transcribes locally with
-faster-whisper, ranks moments with an LLM, renders with ffmpeg. Runs entirely on
-the user's machine and ships as a single Windows .exe.
+faster-whisper, ranks moments with an LLM, looks at each winner's frames so its
+title names what is on screen, renders with ffmpeg. Runs on the user's machine
+and ships as a Windows .exe, a mac .app and a Linux binary.
 
 **"Walk me through the architecture."**
 Four decoupled stages — download, transcribe, rank, render — behind a FastAPI
@@ -2514,18 +2576,30 @@ silently discarded. The fix: rebase each chunk to zero, keep the offset, add it
 back after ranking.
 
 **"How did you make it work on stream footage when generic tools don't?"**
-Two things. The renderer searches for the webcam **only in the corner it lives
-in**, so a game character's face can't win the crop — and takes the median of six
-samples so one bad detection can't skew it. And the ranking prompt teaches the
+Two things. The renderer finds the webcam by what makes an overlay an overlay:
+it does not move. Twenty frames from eight minutes around the clip, the face
+most of them agree on (a face in the game turns up once and is outvoted — it
+once won the old largest-face rule as a baby's photo), and a crop fitted inside
+the border that persists across all of them. And the ranking prompt teaches the
 model to separate streamer speech from game narration by register, then hard-
 requires the streamer's own voice in every clip.
 
+**"How does it know which game is in a clip?"**
+It looks: four frames per clip go to a vision model before any title is
+written. What matters is what it does *not* trust — the model named a Fears to
+Fathom clip Phasmophobia at confidence 1.0. So the code asks for the evidence
+(text on screen, the clip's words, the listing) and demotes any name without it
+to a guess, which the title never prints. Model confidence is not calibrated;
+evidence can be checked.
+
 **"How do you handle LLM failures?"**
 Inverted retry logic: give up immediately only on errors retrying can never fix
-(bad key, 404, spent daily quota) and retry everything else five times, honouring
-the server's own `retry in Xs` hint. On a spent daily quota, switch to OpenAI
-mid-run rather than lose a download and a transcription. Every finished chunk is
-checkpointed to disk, so a run that dies resumes where the quota ran out.
+(bad key, 404, spent daily quota) and retry everything else eight times,
+honouring the server's own `retry in Xs` hint. On a spent quota or a provider
+that stays busy, switch to Groq, then OpenAI, mid-run rather than lose a
+download and a transcription. Every finished chunk is checkpointed to disk, and
+each pipeline stage retries itself too — so a run that still dies can be sent
+round again with **Try again** and resumes where it stopped.
 
 **"How do you keep it cheap?"**
 Five caches — download, transcript, chunk rankings, job manifest, model list —

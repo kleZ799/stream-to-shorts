@@ -516,19 +516,19 @@ command-line script that crops talking-head videos. That origin is why GitHub
 lists its authors as contributors here — their commits are genuinely in this
 repo's history, and the licence keeps them credited.
 
-Rather than assert a boundary, here is the measured one. `git blame` over the
-current tree, 14,020 lines:
+Rather than assert a boundary, here is the measured one. `git blame` over every
+text file in the current tree, 24,094 lines (re-measured at v1.11.2):
 
 | | Lines | Share |
 |---|---:|---:|
-| **Parth Bhadana** | **12,519** | **89.3%** |
-| Anil Matcha (base) | 1,175 | 8.4% |
-| Arael Espinosa | 204 | 1.5% |
-| LathissKhumar | 122 | 0.9% |
+| **Parth Bhadana** | **22,665** | **94.1%** |
+| Anil Matcha (base) | 1,106 | 4.6% |
+| Arael Espinosa | 194 | 0.8% |
+| LathissKhumar | 129 | 0.5% |
 
-Code only, excluding documentation: **88.3%** mine. Since the fork point
-(`c30376e`, 29 Jul 2026): **96 of 117 commits**, **+12,709 / −358 lines**, and
-**27 of the 48 files** did not exist before.
+Code only, excluding documentation: **93.3%** mine. Since the fork point
+(`c30376e`, 29 Jul 2026): **190 commits**, **+22,654 / −413 lines**, and
+**58 of the 79 files** now in the repo did not exist before.
 
 Run `git blame` yourself — that is rather the point of quoting a number instead
 of a claim.
@@ -541,11 +541,15 @@ an application, is mine:**
 - A **desktop app**: a FastAPI server on a free port, run from a background thread, behind a native WebView2 window. No browser, no address bar, no terminal.
 - A **job runner** — queued work, one CPU-bound job at a time, progress streamed to the browser over SSE.
 - A **clip editor** — re-cut, mute, save or delete a finished clip without re-running the pipeline.
+- **Stages that retry themselves**, and a Try again that resumes a failed run from its caches.
 - The **interface**, built on YouTube's own layout so the audience already knows how to use it.
 - A **single-file Windows build** with ffmpeg bundled, so a non-technical user installs nothing.
 
 **The stream intelligence** — upstream ranks any talking-head video; this one understands streams
-- **`local/gaming_layout.py`** — the entire webcam-over-gameplay renderer: corner-scoped face location, median-stabilised framing, single-pass ffmpeg `vstack`.
+- **`local/gaming_layout.py`** — the entire webcam-over-gameplay renderer: the overlay located from twenty frames across eight minutes (the face the samples agree on, the border that persists), a crop fitted inside it, single-pass ffmpeg `vstack`.
+- **`vision.py`** — frames from every clip shown to a vision model, so a variety stream's clips are filed under the game actually on screen, and a game is named only when something confirms it.
+- **Ranked packaging** — five titles per clip on different angles, scored on an editor's rubric and checked in code, with ranked tags to pick from.
+- **A planned camera path** for full-frame face cams — dead zone, zero-lag easing, cuts kept as cuts — instead of a crop chasing a jittery detector.
 - **`STREAM_VIRALITY_CRITERIA`** — a ranking prompt that separates streamer speech from game narration on one mixed track, and refuses any clip without the streamer in it.
 - **Natural-language layout parsing** — "webcam top, 5 clips" or "cut 14:45 to 15:30" resolves to a render spec, with an exact-span path that skips transcription and ranking entirely.
 
@@ -618,7 +622,9 @@ flowchart LR
     J --> F
     F --> G[snap to sentences<br/>hook first, length enforced]
     G --> K[dedupe<br/>drop >50% overlap]
-    K --> H[ffmpeg vstack<br/>webcam over gameplay]
+    K --> V[vision: 4 frames per clip<br/>what is on screen]
+    V --> S[5 ranked titles, tags<br/>filed under the real game]
+    S --> H[ffmpeg vstack<br/>webcam over gameplay]
     H --> I[hook cold open<br/>-14 LUFS]
     I --> L[titled mp4s<br/>1080×1920]
 ```
@@ -688,7 +694,9 @@ Every clip comes back with a score, a title, and a one-line reason it should wor
 
 ### 4. Render
 
-Cut and stack in one ffmpeg pass, straight to 1080×1920 h264 with `+faststart`. Upload-ready for Shorts, Reels, and TikTok with no server-side re-encode.
+Before anything renders, four frames from each chosen clip are shown to a vision model, which says what the clip actually is — which game, or whether it is a podcast or a story told to camera — and the titles, tags and hashtags are written for that, five titles ranked per clip.
+
+Cut and stack in one ffmpeg pass, straight to 1080×1920 h264 with `+faststart`. Upload-ready for Shorts, Reels, and TikTok with no server-side re-encode. The webcam panel is cropped inside your overlay's own border, found from the minutes around each clip; a clip whose camera fills the whole frame gets the face-following crop instead.
 
 Two things happen on the way out. Audio is normalised to **-14 LUFS**, the
 target all three platforms mix toward — a Short that plays quieter than the one
@@ -858,6 +866,11 @@ The knobs that change output quality most, in order:
 | `TRIGGER_PHRASES` | `shorts_generator/signals.py` | The reaction phrases that score as a hook, weighted. Add the ones **you** actually say |
 | `TARGET_BY_KIND` | `shorts_generator/boundaries.py` | Clip length per content type, when the prompt names no length of its own |
 | `REPLAY_SECONDS` | `shorts_generator/hook_open.py` | How long the hook cold open runs, `1.9s` by default |
+| `CONTEXT_SECONDS` | `local/gaming_layout.py` | How far either side of a clip to look when locating your webcam overlay, `240s` by default. Lower it if your layout changes often mid-stream |
+| `DEAD_ZONE` / `EASE_SECONDS` | `local/clipper.py` | Face-follow: how far you can move before the frame follows (`12%` of it), and how gently it eases after you (`0.45s`) |
+| `FRAMES_PER_CLIP` | `shorts_generator/vision.py` | Frames shown to the vision model per clip, `4` by default |
+| `TITLE_OPTIONS` | `shorts_generator/seo.py` | Titles written per clip for you to choose from, `5` by default |
+| `STAGE_ATTEMPTS` / `CLIP_ATTEMPTS` | `webapp/jobs.py` | How many times a stage, or one clip's render, is tried before a run gives up, `3` each |
 | Provider | Settings | Gemini, Groq or OpenAI. Add a **free Groq key** as a fallback so a busy Gemini cannot end a run |
 | `LOCAL_WHISPER_MODEL` | `.env` | `base` is plenty for ranking. `small` reads better and hallucinates less — and on a GPU it is *faster* than `base`, so use it if you have one |
 | Spoken language | Render panel | English by default. Pinning it is the fix for whisper inventing text in another language |
