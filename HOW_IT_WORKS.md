@@ -136,7 +136,8 @@ Two fixes, and they are the two most interesting parts of the codebase:
 | LLM | **Google Gemini** (`google-genai`) / **Groq** / **OpenAI** | Gemini's free tier makes the app free to run; Groq is a free fallback with capacity of its own, OpenAI the paid one |
 | Scene understanding | the same providers' **vision models** | Four frames per clip say which game is on screen — or that it is a podcast — with no model of our own to ship |
 | Video processing | **ffmpeg** (subprocess) | Single-pass filter graphs do crop/scale/stack without touching frames in Python |
-| Computer vision | **OpenCV** (Haar cascades) + **NumPy** | Face detection with no model download and no GPU requirement; overlay borders from statistics over a stack of frames |
+| Computer vision | **OpenCV** — **YuNet** (`FaceDetectorYN`), Haar as fallback — + **NumPy** | A 230 KB learned face detector shipped in the build, no GPU needed; overlay borders from statistics over a stack of frames |
+| Hardware encoding | ffmpeg's **NVENC / VideoToolbox / Quick Sync / AMF** | Encoding on the graphics chip when one really works — each is test-encoded before use — with libx264 as the fallback |
 | Frontend | **Vanilla JS + CSS**, no framework | Zero build step, ~3.5k lines total, ships as three static files inside the exe |
 | Live updates | **Server-Sent Events** | One-directional server→client is exactly the shape of progress reporting; simpler than WebSockets |
 | Desktop shell | **pywebview** (Edge WebView2) | A native window with no address bar, using a browser engine Windows already has |
@@ -159,9 +160,9 @@ which is well inside what vanilla DOM handles cleanly.
 graphs (`crop → scale → vstack`) that ffmpeg executes in one pass with zero
 frames crossing into Python. That is the difference between clips rendering in
 seconds and rendering in minutes. The one renderer that *does* touch frames in
-Python (`facetrack`) decodes every frame to plan its camera path, and is about
-9× slower than a plain crop — 91s against 10s for 30 seconds of a 720p60
-stream — which the UI warns about explicitly.
+Python (`facetrack`) reads every frame of the clip to plan its camera path, and
+still renders 30 seconds of 720p60 in about 11s on a GPU and 17s on a CPU —
+because it seeks straight to the clip rather than decoding the stream up to it.
 
 ---
 
@@ -209,6 +210,8 @@ shorts_generator/
 ├── layout_spec.py          natural language → LayoutSpec; quality ladder
 ├── render.py               one entry point that dispatches a LayoutSpec
 ├── vision.py               what each clip shows, from four of its frames
+├── faces.py                face detection: YuNet, with Haar as the fallback
+├── accel.py                which processor encodes video and runs Whisper
 ├── seo.py                  per-clip subject, ranked titles, tags, hashtags
 │
 ├── downloader.py           api mode: MuAPI /youtube-download
@@ -704,7 +707,7 @@ move** — which means looking at more than the clip:
    `CONTEXT_SAMPLES` (14) from `CONTEXT_SECONDS` (240) either side of it, each
    scaled to `ANALYSIS_WIDTH` (960). Over eight minutes the game underneath
    changes completely; the overlay does not.
-2. **The streamer is the face that recurs.** Haar runs on every sample; each
+2. **The streamer is the face that recurs.** YuNet runs on every sample; each
    detection counts how many others sit within a face-width of it, and the
    best-supported one plus its neighbours is the streamer (`_recurring_face`).
    A face in the game appears in one or two samples and loses the vote. Only
@@ -758,8 +761,8 @@ crop that is always moving a little reads as a shaky camera. So the path is now
 **planned before anything renders**, the way a camera operator would shoot it:
 
 1. **Detect** (`track_faces`) ~8 times a second (`DETECT_PER_SECOND`) on a 640px
-   copy, frontal cascade first and the profile cascade in both directions when
-   that misses. The track stays on the person already followed; a face somewhere
+   copy, with YuNet (`faces.py`, [§7.6](#76-finding-faces--facespy)); a
+   `proc.wait_if_paused()` between samples is what lets Pause hold this pass. The track stays on the person already followed; a face somewhere
    else must hold for `CONFIRM_SAMPLES` before the window goes to it.
 2. **Clean**: gaps are held at the last position, spikes removed with a ~0.6s
    median.
@@ -786,16 +789,83 @@ Fixes that carried over, each of which once produced an opaque failure:
   handle closes, and a real encoding error otherwise surfaces as a confusing
   `WinError 32` from the cleanup path.
 
-Measured on 30 seconds of a 720p60 stream: **91s**, against 10s for the centre
-crop and 13s for the stacked layout — about **9× slower**, because every frame
-is still decoded to find the face, even though only eight a second are
-searched. `LayoutSpec.warning()` says so in the UI before the user commits to a
-long render.
+It used to be about 9× slower than the other layouts — 91s for 30 seconds of
+720p60 — and almost none of that was face tracking. The clip cut put `-ss`
+*after* `-i`, which makes it an output seek: ffmpeg decoded the stream from its
+first frame and threw frames away until it reached the clip, so a clip at 28:20
+paid for decoding 28 minutes of video it never used. With the seek moved before
+the input (and `-t` for a duration instead of `-to`), the same clip renders in
+**10.8s on a GPU and 17.0s on a CPU** — the same ballpark as the stacked layout
+— and `LayoutSpec.warning()` no longer warns about it.
 
 ### 7.4 `center` — plain centre crop
 
 `render.py::_render_center_clip`. Widest centre crop at the target ratio, one
 ffmpeg pass, no face detection at all. For *"gameplay only, no webcam"*.
+
+### 7.5 Which processor — `accel.py`
+
+Two stages can use a GPU, and they need different things from it.
+
+**Video encoding** is ffmpeg's, and ffmpeg can hand it to the graphics chip —
+NVENC on NVIDIA, VideoToolbox on a Mac, Quick Sync on Intel, AMF on AMD — which
+needs only the graphics driver the machine already has. Every encode in the app
+goes through `accel.run_encode(build_cmd, …)`: the caller builds the command
+around a slot for the encoder arguments, and `accel` fills it. Each hardware
+encoder maps libx264's CRF onto its own constant-quality control (`-cq`,
+`-global_quality`, `-qp_*`, `-q:v`), so a clip looks the same whichever chip
+made it.
+
+Nothing is trusted from a name. `ffmpeg -encoders` lists what the *build*
+supports, not what the *machine* can do — this laptop's ffmpeg lists AMD's AMF
+with no AMD GPU in it — so `probe_video()` gives each listed encoder a
+one-second test encode, in order, and uses the first that passes. The answer is
+cached for the process. If a hardware encode then fails mid-run (an NVENC
+session limit, a driver fault), `run_encode` redoes that clip on libx264 and
+marks the encoder broken for the rest of the run; `reset_run()` at the start of
+each job gives it another chance. Measured here: the stacked layout renders 30s
+of 720p60 in **10.6s on NVENC against 20.3s on the CPU**.
+
+**Transcription** runs on CTranslate2, which uses an NVIDIA GPU through CUDA —
+but only with NVIDIA's cuBLAS and cuDNN, which the published single-file builds
+leave out (~2 GB). The old check asked CTranslate2 whether it could *count* a
+GPU, which it can on any NVIDIA machine, so packaged builds started on CUDA and
+died on the first window looking for `cublas64_12.dll`. `whisper_device()` now
+also loads the libraries with `ctypes` first; a missing one means the CPU and a
+sentence saying so. A CUDA failure mid-run still falls back, and
+`mark_cuda_failed()` keeps the rest of the run off the GPU. On a Mac the engine
+has no GPU path at all, and the reason says that too.
+
+The setting is `PROCESSOR` — `auto` (the default: whatever works fastest),
+`gpu` (the same search, said out loud when there is no GPU), or `cpu` (never
+touch one) — read live through `config.current_processor()`, so a change made
+while a run is paused applies from the next clip. `LOCAL_WHISPER_DEVICE`, the
+older developer knob, still outranks it for transcription when set. The
+Settings panel reads `GET /api/processor`; while a run is paused and the encoder
+has never been probed, it reports it as unknown rather than starting a test
+encode that would wait on the pause.
+
+### 7.6 Finding faces — `faces.py`
+
+Both renderers find faces through one function, `faces.detect()`, which returns
+`(cx, cy, width, confidence)` for every face in a BGR frame. It uses **YuNet**,
+a ~230 KB learned detector from OpenCV's model zoo that OpenCV runs natively
+through `FaceDetectorYN`, and falls back to the Haar cascades (frontal, then
+profile both ways) if the model file is missing, this OpenCV lacks
+`FaceDetectorYN`, or the model will not load — saying so once in the log.
+
+The model is committed under `assets/models/` with its MIT licence and bundled
+into every build, so nothing downloads at run time; `model_path()` finds it in
+a source checkout or under PyInstaller's `_MEIPASS`. YuNet's own confidence
+floor is 0.9, tuned for photographs; it is 0.7 here, because a webcam face in a
+corner overlay is small and softly lit and both renderers already vote across
+many frames.
+
+Measured on the repo's test footage: the face cam's face found in 132 of 150
+samples (Haar: 125), and the stacked locator's samples agreeing 18–20 times out
+of ~20 (Haar: 3–16), at about 12 ms a frame on a laptop CPU. YuNet sees *more*
+faces, not fewer — including the photos inside a game — which is why the
+recurring-face vote stays.
 
 ---
 
@@ -1817,7 +1887,8 @@ this workflow, scripted.
 `build_exe.py` wraps PyInstaller. `--onedir` (default) starts faster;
 `--onefile` is a single self-contained exe that unpacks itself each launch.
 
-**Bundled:** `webapp/static`, and `./bin` (ffmpeg + ffprobe) when present — which
+**Bundled:** `webapp/static`, `assets/models` (the YuNet face detector), and
+`./bin` (ffmpeg + ffprobe) when present — which
 is what makes the published build need nothing installed. Hidden imports cover
 everything PyInstaller's static analysis can't see:
 `webview.platforms.edgechromium`, `faster_whisper`, `ctranslate2`, `cv2`,
@@ -2149,9 +2220,15 @@ raced. And a job that *ends* while paused clears the gate on its way out —
 otherwise the next run would start and block on a pause with no UI to lift it,
 because the job it belonged to is gone.
 
-The honest limit: transcription is one long in-process call, not a child. Pause
-during that stage takes effect when the pipeline next reaches an external
-program rather than immediately.
+Two stages run inside the app rather than as a child, so there is no process to
+suspend: transcription and the face-follow detection pass. Both now hold at a
+checkpoint instead — `proc.wait_if_paused()` between Whisper segments (the
+generator is lazy, so blocking the loop stops the model decoding the next
+window, on the CPU or the GPU alike) and between face samples. Measured: a
+paused ffmpeg cut's output stayed at exactly the same byte count for the whole
+pause, the face pass made no detections during it, and an 8-second pause
+added 7.6s to a CPU transcription. The limit that remains is granularity:
+Whisper stops at the end of the window it is decoding, a second or two later.
 
 ---
 
@@ -2355,14 +2432,14 @@ Since only one job runs at a time this is correct, but anything else printing on
 another thread during a job — an unrelated request handler, say — lands in that
 job's log. Harmless today; the first thing to fix before adding a second worker.
 
-### Face detection is Haar, and OpenCV 5 removed it
+### Face detection is YuNet, with Haar underneath
 
-Both renderers depend on `cv2.CascadeClassifier`, which 5.x dropped — hence the
-`opencv-python>=4.8.0,<5` pin. Haar is also weak on profiles, heavy shadow and
-large headsets. The face-following renderer adds the profile cascade in both
-directions for that; the stacked one never trusts a single detection — the
-streamer is whichever face ~20 samples agree on — and falls back to a centre
-crop out loud instead of silently shipping a bad framing.
+YuNet does the detecting now ([§7.6](#76-finding-faces--facespy)), but the Haar
+fallback still depends on `cv2.CascadeClassifier`, which OpenCV 5.x dropped —
+hence the `opencv-python>=4.8.0,<5` pin stays. YuNet is far better on profiles,
+shadow and headsets, not perfect: a face turned fully away is still missed,
+which is why the face crop holds its last position through gaps and the
+stacked layout never trusts a single detection.
 
 ### The frames can name the wrong game
 
@@ -2386,6 +2463,22 @@ same step, so the app itself never loses track.
 ### 17.1 Fixed since this document was written
 
 Kept because the failure modes are instructive.
+
+**Face-follow decoded the whole stream up to every clip.** `-ss` after `-i` is an
+output seek, so each clip's cut decoded the source from its first frame. It
+looked like face tracking was slow — the UI even warned it was ~9× slower —
+until it was timed stage by stage. One argument moved: 91s → 17s on a CPU.
+The lesson is the usual one: measure the stage before blaming the algorithm.
+
+**Packaged builds crashed into CUDA.** CTranslate2 counts an NVIDIA GPU whether
+or not cuBLAS is installed, and the published builds leave cuBLAS out, so every
+NVIDIA user's transcription started on the GPU, died, and fell back with an
+error that read like the app had broken. The libraries are now loaded before
+the GPU is chosen ([§7.5](#75-which-processor--accelpy)).
+
+**Pause did not reach transcription.** It suspended ffmpeg children and nothing
+else, so the longest stage ran on through a pause. A checkpoint between
+segments fixed it ([§16a](#16a-subprocesses-windows-and-stopping-them)).
 
 **The face-tracking crop stuttered.** It detected a face on every frame and
 eased 15% of the way toward each new box. That reads as smooth on paper; on
@@ -2528,6 +2621,8 @@ rather than guessing from what the button last did.
 | `POST …/clips/{file}/trim` | Re-cut from source at new timestamps, optionally muted |
 | `POST …/clips/{file}/save` | Copy out of the working folder into the save location |
 | `DELETE …/clips/{file}` | Delete the clip and its file |
+| `GET /api/processor` | What video encoding and transcription will run on, and why (`?recheck=true` re-tests the encoders) |
+| `POST /api/processor` | Set `auto`, `gpu` or `cpu`; applies from the next clip, even on a paused run |
 | `POST /api/jobs/{id}/retry` | Run a failed job again from where its caches stop it; `?clips_only=true` re-renders only a finished run's failed clips |
 | `POST /api/jobs/{id}/seo` | Write or rewrite upload metadata (`?force=true` to overwrite, `?only={file}` for one clip) |
 | `PUT …/clips/{file}/seo` | Save metadata the user typed, or a corrected `subject`; renames the mp4 to a new title |
@@ -2623,8 +2718,8 @@ driven through real typing and clicks in the browser rather than by setting
 state directly.
 
 **"What would you do next?"**
-Replace the Haar cascade with a modern detector so profile views and headsets
-don't defeat it. Add a regression test suite around `_sanitize_highlights`,
+Rank title options against real retention data rather than an assumed rubric.
+Add a regression test suite around `_sanitize_highlights`,
 `chunk_transcript` and `layout_spec` parse ordering — all three encode hard-won
 ordering constraints that a refactor could silently break, and "silently" is the
 recurring theme of every real bug found here. And fix the process-global

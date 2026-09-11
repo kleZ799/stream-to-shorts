@@ -273,7 +273,7 @@ output will propagate the degradation.
 
 ## 5. AI/ML: computer vision
 
-**Files:** `shorts_generator/local/gaming_layout.py`, `clipper.py`, `shorts_generator/vision.py`
+**Files:** `shorts_generator/local/gaming_layout.py`, `clipper.py`, `shorts_generator/faces.py`, `shorts_generator/accel.py`, `shorts_generator/vision.py`
 
 **Haar cascade classifiers** (`cv2.CascadeClassifier` with
 `haarcascade_frontalface_default.xml`). This is *classical* CV, not deep
@@ -288,11 +288,34 @@ learning, and the distinction is worth being able to draw:
   stage is rejected immediately. Since most of an image is not a face, most
   windows die in stage 1. That is where the speed comes from.
 
-**Why this and not a CNN:** it runs fast on CPU, needs no model download, and
-ships inside a PyInstaller bundle as a small XML file. The task is "find the
-approximate face box in a webcam overlay" — a modern detector would be more
-accurate at real cost in size and dependencies. A deliberate accuracy/deployment
-tradeoff, not an oversight.
+**Why Haar was first, and why YuNet replaced it:** Haar runs fast on CPU and
+ships as a small XML file inside OpenCV — the right call when the task was
+"find the approximate face box in a webcam overlay". It stopped being the
+right call once the cost of its misses showed up: a twenty-frame vote to stay
+on the streamer, a second cascade for profiles, and faces lost to a turned
+head. **YuNet** is a small convolutional network — about 230 KB of ONNX weights
+— that OpenCV runs natively, with no deep-learning framework in the bundle. It
+is trained on faces at angles and in poor light, returns a confidence per
+face, and runs at ~12 ms a frame on a laptop CPU. The deployment cost that once
+justified Haar turned out to be one small file. Haar stays as the fallback, so
+a missing model degrades detection rather than breaking it.
+
+### Trusting a test over a name
+
+A GPU video encoder is only worth using if it works *on this machine*, and
+nothing the system says is proof. ffmpeg lists the encoders it was *built*
+with, not the hardware present — this laptop's list includes AMD's encoder with
+no AMD GPU in it. CTranslate2 counts an NVIDIA GPU whether or not the CUDA
+libraries it needs are installed. Both are capability claims, and both were
+wrong often enough to cause real failures.
+
+So `accel.py` treats them as hypotheses to test: a one-second encode per listed
+encoder, and a `ctypes` load of each CUDA library, before anything is chosen.
+And because a test can pass and the real thing still fail later (a session
+limit, a driver fault), the chosen encoder is also allowed to fail at run time,
+once, before the clip is redone on the CPU. That is the general shape of
+**capability detection**: probe with the real operation, cache the answer, and
+keep a fallback for when the probe was not the whole story.
 
 **Sampling:** the face is located from several frames, not one, and the results
 are aggregated (`from 14/20 samples` in the logs). One frame can catch a blink, a
@@ -1184,12 +1207,12 @@ Ordered by value, with the reasoning that makes each defensible:
 5. **Jitter on the retry backoff**, and Credential Manager for the API key.
    Both small, both known gaps.
 
-6. **A learned face detector.** Haar is why the stacked layout needs twenty
-   frames and a vote, and why the face crop falls back to a profile cascade.
-   YuNet — a ~300 KB model OpenCV runs natively — is far better on profiles,
-   shadow and headsets. The cost is one model file in every build; the
-   tradeoff that justified Haar at the start has shifted now that the vision
-   pass already sends frames to a model anyway.
+6. **Transcription on non-NVIDIA GPUs.** Done since this list was written: a
+   learned face detector (YuNet) and GPU video encoding on every vendor. What
+   is left is the slowest stage: CTranslate2 only accelerates on NVIDIA, so a
+   Mac or an AMD/Intel machine transcribes on the CPU. A Whisper backend on
+   Apple's Metal or on DirectML would close that — at the cost of a second
+   engine to keep in step with the first.
 
 7. **Rank titles against outcomes too.** Title options are scored by a rubric
    and a code check, both assumed. The same retention data as item 3 would say

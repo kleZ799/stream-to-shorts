@@ -95,7 +95,21 @@ told which stage it's on, because a three-hour VOD is not a two-second wait.
 Rendering takes every core it can get. If that makes the PC unusable, **Pause**
 suspends the work where it stands — ffmpeg is stopped, not asked politely to
 finish the current clip — and the CPU comes back immediately. Resume picks up
-where it left off; nothing is lost and nothing is re-done.
+where it left off; nothing is lost and nothing is re-done. It holds
+transcription and face tracking too, on the CPU or the GPU.
+
+### Use the GPU — or don't
+
+**Settings → Processor** decides what does the heavy work: **Automatic** (the
+fastest thing this computer really has), **GPU**, or **CPU only**.
+
+On Automatic, video is encoded on the graphics chip — NVIDIA, Intel, AMD or a
+Mac's — which roughly halves render time, and transcription uses an NVIDIA GPU
+when NVIDIA's CUDA libraries are there. Each is tested before it is used, so a
+driver that claims more than it can do falls back to the CPU instead of
+failing, and the panel says in plain words what is being used and why. If a
+graphics driver keeps misbehaving, **CPU only** never touches it. The choice
+applies from the next clip, even on a paused run.
 
 ### Your clips folder is readable
 
@@ -550,6 +564,7 @@ an application, is mine:**
 - **`vision.py`** — frames from every clip shown to a vision model, so a variety stream's clips are filed under the game actually on screen, and a game is named only when something confirms it.
 - **Ranked packaging** — five titles per clip on different angles, scored on an editor's rubric and checked in code, with ranked tags to pick from.
 - **A planned camera path** for full-frame face cams — dead zone, zero-lag easing, cuts kept as cuts — instead of a crop chasing a jittery detector.
+- **`faces.py` and `accel.py`** — YuNet face detection with Haar underneath, and a Processor setting that test-encodes each GPU encoder before trusting it and checks for CUDA's libraries before starting on the GPU.
 - **`STREAM_VIRALITY_CRITERIA`** — a ranking prompt that separates streamer speech from game narration on one mixed track, and refuses any clip without the streamer in it.
 - **Natural-language layout parsing** — "webcam top, 5 clips" or "cut 14:45 to 15:30" resolves to a render spec, with an exact-span path that skips transcription and ranking entirely.
 
@@ -598,6 +613,7 @@ Every clip renders as **webcam over gameplay**, because that's the format that s
 The webcam isn't a hardcoded rectangle. Each clip gets its overlay **located from scratch**, using the one thing that tells an overlay from a game — it doesn't move:
 
 - Sample ~20 frames: six inside the clip, the rest from the minutes around it, so the game underneath changes completely while the overlay stays put
+- Faces are found with **YuNet**, a small learned detector that ships inside the app — it catches turned heads, dim rooms and headsets that the old detector missed
 - The streamer is the face that **keeps turning up in the same place** — a face in the game shows up once and is outvoted
 - The overlay's **border** is an edge that is there in every sample, with moving game outside it and a still room inside
 - Crop head-and-shoulders **inside that border**, at the panel's own shape — no gameplay and no letterbox bars in the webcam panel
@@ -871,6 +887,8 @@ The knobs that change output quality most, in order:
 | `FRAMES_PER_CLIP` | `shorts_generator/vision.py` | Frames shown to the vision model per clip, `4` by default |
 | `TITLE_OPTIONS` | `shorts_generator/seo.py` | Titles written per clip for you to choose from, `5` by default |
 | `STAGE_ATTEMPTS` / `CLIP_ATTEMPTS` | `webapp/jobs.py` | How many times a stage, or one clip's render, is tried before a run gives up, `3` each |
+| Processor | Settings, or `PROCESSOR` in `.env` | `auto` (default), `gpu` or `cpu` — what encodes video and runs transcription. `LOCAL_WHISPER_DEVICE`, if set, still pins transcription |
+| `SCORE_THRESHOLD` | `shorts_generator/faces.py` | How sure YuNet must be to count a face, `0.7`. Raise it if a crop keeps catching faces in the game |
 | Provider | Settings | Gemini, Groq or OpenAI. Add a **free Groq key** as a fallback so a busy Gemini cannot end a run |
 | `LOCAL_WHISPER_MODEL` | `.env` | `base` is plenty for ranking. `small` reads better and hallucinates less — and on a GPU it is *faster* than `base`, so use it if you have one |
 | Spoken language | Render panel | English by default. Pinning it is the fix for whisper inventing text in another language |
