@@ -268,6 +268,11 @@ def main() -> int:
         # The UI files are read from disk at runtime, so they must ship.
         "--add-data", f"{ROOT / 'webapp' / 'static'}{sep}webapp/static",
 
+        # YuNet, the face detector. faces.py looks for it under the bundle's
+        # assets/models and falls back to Haar if it is missing, so a build
+        # without it still works -- it just finds faces worse.
+        "--add-data", f"{ROOT / 'assets' / 'models'}{sep}assets/models",
+
         # The native window. pywebview picks its backend at runtime, so
         # PyInstaller sees none of it without being told.
         "--hidden-import", "webview",
