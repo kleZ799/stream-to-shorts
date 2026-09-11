@@ -697,7 +697,14 @@ Copy `.env.example` to `.env` and fill it in:
 ```ini
 LLM_PROVIDER=gemini
 GEMINI_API_KEY=your_key_here
-GEMINI_MODEL=gemini-3.6-flash
+# Not the highest number on purpose: probed against a real free-tier key,
+# 3.6-flash returns 429 because its 20-a-day allowance is already spent, and
+# 3.8-flash answers about two times in three. 3.5-flash answered every time.
+GEMINI_MODEL=gemini-3.5-flash
+# Optional, free, no card: https://console.groq.com. Used automatically when
+# Gemini is busy or its quota is spent.
+GROQ_API_KEY=
+GROQ_MODEL=openai/gpt-oss-120b
 LOCAL_WHISPER_MODEL=base
 LOCAL_WHISPER_DEVICE=auto
 LOCAL_OUTPUT_DIR=output
