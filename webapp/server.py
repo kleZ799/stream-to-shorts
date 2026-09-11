@@ -677,18 +677,23 @@ async def library() -> dict:
 
 
 @app.post("/api/jobs/{job_id}/seo")
-async def write_seo(job_id: str, force: bool = False) -> dict:
+async def write_seo(job_id: str, force: bool = False, only: Optional[str] = None) -> dict:
     """Write (or rewrite) the upload metadata for a job's clips.
 
     Runs on demand rather than at listing time: it costs an LLM call, and for
     clips old enough to have no transcript on record it costs a short
-    transcription too.
+    transcription too. `only` names one clip's file to rewrite on its own.
     """
     job = _job_or_404(job_id)
     if not job.clips:
         raise HTTPException(409, "This run has no clips to write metadata for.")
+    if only is not None:
+        only = os.path.basename(only)
+        if STORE.clip(job, only) is None:
+            raise HTTPException(404, "No such clip")
     try:
-        written = await asyncio.to_thread(regenerate_seo, STORE, job, force)
+        written = await asyncio.to_thread(regenerate_seo, STORE, job, force or bool(only),
+                                          only)
     except Exception as e:
         raise HTTPException(500, f"Could not write the metadata: {e}")
     return {"written": written, "clips": job.clips}
@@ -896,6 +901,10 @@ class SeoEditRequest(BaseModel):
     # or as a list, so both the UI and a script can post here.
     tags: Optional[object] = None
     hook_text: Optional[str] = None
+    # What the clip is actually about, when the app got it wrong -- "Fear to
+    # Fathom", not the game it guessed. Saved on the clip, not in the text,
+    # and every rewrite after this files the clip under it. Empty clears it.
+    subject: Optional[str] = None
 
 
 @app.put("/api/jobs/{job_id}/clips/{filename}/seo")
@@ -919,12 +928,17 @@ async def edit_seo(job_id: str, filename: str, req: SeoEditRequest) -> dict:
     if not edit:
         raise HTTPException(400, "Nothing to save.")
 
-    try:
-        seo = apply_edit(clip.get("seo"), edit)
-    except ValueError as e:
-        raise HTTPException(400, str(e))
-
-    STORE.set_seo(job, safe, seo)
+    subject = edit.pop("subject", None)
+    seo = clip.get("seo") or {}
+    if edit:
+        try:
+            seo = apply_edit(clip.get("seo"), edit)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        STORE.set_seo(job, safe, seo)
+    if subject is not None:
+        STORE.replace_clip(job, safe, {
+            "subject_override": re.sub(r"\s+", " ", subject).strip()[:80]})
 
     updated = STORE.clip(job, safe)
     if "title" in edit:

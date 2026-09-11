@@ -649,10 +649,13 @@ class JobStore:
                     for i, (a, b) in enumerate(job.spec.time_ranges, 1)
                 ]
                 all_highlights = list(top)
+                subject = detect_subject(job.video_meta, None, job.source, call_local_llm)
+                with self._lock:
+                    job.subject = subject
+                    job._version += 1
+                _look_at_clips(job, top, source_path, None, subject)
                 attach_seo(top, transcript=None, video_meta=job.video_meta,
-                           source=job.source, llm_fn=call_local_llm,
-                           subject=detect_subject(job.video_meta, None,
-                                                  job.source, call_local_llm))
+                           source=job.source, llm_fn=call_local_llm, subject=subject)
                 self._update(job, stage="render", frac=0.0,
                              message=_STAGE_LABELS["render"])
                 shorts = render_highlights(source_path, top, job.spec, out_dir=job.out_dir)
@@ -715,6 +718,12 @@ class JobStore:
             with self._lock:
                 job.subject = subject
                 job._version += 1
+            # Then what each clip actually shows. The listing names one game;
+            # the frames say which one this clip is, and whether it is a game
+            # at all -- see shorts_generator/vision.py.
+            self._update(job, frac=0.65, message="Looking at what is on screen")
+            _look_at_clips(job, top, source_path, transcript, subject)
+            self._update(job, frac=0.8, message="Writing titles, tags and hooks")
             attach_seo(top, transcript=transcript, video_meta=job.video_meta,
                        source=job.source, llm_fn=call_local_llm, subject=subject)
 
@@ -784,6 +793,9 @@ class JobStore:
                 "signals": s.get("signals"),
                 "boundary_notes": s.get("boundary_notes"),
                 "hook_replay_seconds": s.get("hook_replay_seconds"),
+                # What the clip's frames showed. Kept so a rewrite months
+                # later files it under the same thing without looking again.
+                "scene": s.get("scene"),
                 "seo": s.get("seo"),
                 "error": s.get("error"),
                 "job_id": job.id,
@@ -852,19 +864,69 @@ def _clip_words(job: Job, clip: Dict) -> str:
                     for s in result.get("segments", [])).strip()[:1600]
 
 
-def regenerate_seo(store: "JobStore", job: Job, force: bool = False) -> int:
+def _look_at_clips(job: Job, highlights: List[Dict], source_path: Optional[str],
+                   transcript: Optional[Dict], subject: Optional[Dict]) -> None:
+    """Attach a `scene` -- what the frames show -- to each highlight, in place.
+
+    Frames come from the source when it is still on disk, at the clip's span,
+    and otherwise from the rendered clip itself. Best-effort: a clip that
+    cannot be looked at keeps no scene and is written from its words.
+    """
+    from shorts_generator.local.llm import call_vision_llm, vision_images_per_request
+    from shorts_generator.seo import clip_words, describe_video
+    from shorts_generator.vision import describe_clips
+
+    items, idx = [], []
+    for i, h in enumerate(highlights):
+        if h.get("scene"):
+            continue
+        start, end = h.get("start_time"), h.get("end_time")
+        if source_path and os.path.exists(source_path) and start is not None and end is not None:
+            items.append({"path": source_path, "start": float(start), "end": float(end)})
+        elif h.get("_clip_path") and os.path.exists(h["_clip_path"]):
+            items.append({"path": h["_clip_path"], "start": 0.0, "end": 0.0})
+        else:
+            continue
+        items[-1]["said"] = clip_words(h, transcript)
+        idx.append(i)
+    if not items:
+        return
+
+    subject = subject or {}
+    candidates = [subject.get("subject") or ""] + list(subject.get("all_subjects") or [])
+    try:
+        scenes = describe_clips(items, call_vision_llm,
+                                video_context=describe_video(job.video_meta, job.source),
+                                candidates=candidates,
+                                images_per_request=vision_images_per_request())
+    except Exception as e:  # noqa: BLE001 - never worth losing a run over
+        print(f"[vision] skipped ({e})", flush=True)
+        return
+    for i, scene in zip(idx, scenes):
+        if scene:
+            highlights[i]["scene"] = scene
+
+
+def regenerate_seo(store: "JobStore", job: Job, force: bool = False,
+                   only: Optional[str] = None) -> int:
     """Write upload metadata for a finished job's clips. Returns how many.
 
     This is what gives clips made before any of this existed a title, a
     description and tags — including ones whose only remaining trace is the
-    mp4 itself.
+    mp4 itself. `only` rewrites a single clip by filename, keeping the rest of
+    the run's titles in view so the new one does not open the same way.
     """
     from shorts_generator.local.llm import call_local_llm
     from shorts_generator.seo import generate_seo
 
     with store._lock:
-        targets = [dict(c) for c in job.clips
-                   if c.get("file") and (force or not c.get("seo"))]
+        if only:
+            targets = [dict(c) for c in job.clips if c.get("file") == only]
+        else:
+            targets = [dict(c) for c in job.clips
+                       if c.get("file") and (force or not c.get("seo"))]
+        others = [(c.get("seo") or {}).get("title") or "" for c in job.clips
+                  if only and c.get("file") != only]
     if not targets:
         return 0
 
@@ -882,12 +944,32 @@ def regenerate_seo(store: "JobStore", job: Job, force: bool = False) -> int:
             "first_line": c.get("first_line") or "",
             "virality_reason": c.get("virality_reason") or "",
             "transcript_text": _clip_words(job, c),
+            "scene": c.get("scene"),
+            "subject_override": c.get("subject_override") or "",
+            "_clip_path": str(Path(job.out_dir) / str(c.get("file") or "")),
         })
+
+    # Clips made before the app looked at frames get looked at now, once; the
+    # answer is saved on the clip so the next rewrite does not pay for it.
+    missing = [h for h in highlights if not h.get("scene")]
+    if missing:
+        source = job.source_path if job.source_path and os.path.exists(job.source_path) else None
+        if source is None:
+            for h in missing:
+                h["start_time"], h["end_time"] = None, None   # read the clip file instead
+        _look_at_clips(job, missing, source, None, job.subject or None)
+        for c, h in zip(targets, highlights):
+            if h.get("scene") and not c.get("scene"):
+                store.replace_clip(job, c["file"], {"scene": h["scene"]})
+            if h["start_time"] is None:
+                h["start_time"] = float(c.get("start_time") or 0.0)
+                h["end_time"] = float(c.get("end_time") or c.get("duration") or 0.0)
 
     errors: List[str] = []
     written = generate_seo(highlights, video_meta=job.video_meta,
                            source=job.source, llm_fn=call_local_llm,
-                           errors=errors, subject=job.subject or None)
+                           errors=errors, subject=job.subject or None,
+                           avoid_titles=[t for t in others if t])
 
     # Only keep what a model actually wrote, or fill a clip that had nothing at
     # all. Writing a fallback over metadata that was generated properly would
