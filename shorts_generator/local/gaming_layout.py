@@ -44,8 +44,9 @@ import os
 import statistics
 from typing import Dict, List, Optional, Tuple
 
-from .. import proc
+from .. import accel, proc
 from ..config import LOCAL_OUTPUT_DIR
+from ..faces import detect as face_detect
 from ..render import LOUDNESS_FILTER
 
 # Fraction of the output height given to the webcam panel.
@@ -137,13 +138,9 @@ def _sample_times(start: float, end: float, duration: float) -> Tuple[List[float
     return inside, [t for t in around if not (start <= t <= end)]
 
 
-def _faces(img, cascade) -> List[Tuple[float, float, float]]:
-    import cv2
-    gray = cv2.equalizeHist(cv2.cvtColor(img, cv2.COLOR_BGR2GRAY))
-    side = max(20, int(img.shape[1] * 0.02))
-    found = cascade.detectMultiScale(gray, scaleFactor=1.08, minNeighbors=6,
-                                     minSize=(side, side))
-    return [(x + w / 2.0, y + h / 2.0, float(w)) for (x, y, w, h) in found]
+def _faces(img) -> List[Tuple[float, float, float]]:
+    """(centre x, centre y, width) of every face in an analysis frame."""
+    return [(cx, cy, fw) for cx, cy, fw, _ in face_detect(img, min_fraction=0.02)]
 
 
 def _in_corner(cx: float, cy: float, w: int, h: int, corner: str) -> bool:
@@ -274,16 +271,13 @@ def locate_webcam(source_path: str, start: float, end: float,
 
     src_w, src_h = _probe_dimensions(source_path)
     inside, around = _sample_times(start, end, _probe_duration(source_path))
-    cascade = cv2.CascadeClassifier(
-        cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
-
     frames, faces = [], []
     for t in inside + around:
         img = _grab(source_path, t)
         if img is None:
             continue
         frames.append(img)
-        faces.extend(_faces(img, cascade))
+        faces.extend(_faces(img))
     if not frames:
         return None
     an_h, an_w = frames[0].shape[:2]
@@ -412,18 +406,17 @@ def render_stacked_clip(
             f"scale={out_w}:{out_h}:flags=lanczos,setsar=1[v]"
         )
 
-    cmd = [
+    accel.run_encode(lambda enc: [
         "ffmpeg", "-y", "-loglevel", "error",
         "-ss", f"{start:.3f}", "-i", source_path, "-t", f"{end - start:.3f}",
         "-filter_complex", filt,
         "-map", "[v]", "-map", "0:a:0?",
         "-af", LOUDNESS_FILTER,
-        "-c:v", "libx264", "-preset", "medium", "-crf", "23", "-pix_fmt", "yuv420p",
+        *enc,
         "-c:a", "aac", "-b:a", "160k",
         "-movflags", "+faststart",
         out_path,
-    ]
-    proc.run_checked(cmd, what="ffmpeg (stacked render)")
+    ], what="ffmpeg (stacked render)", crf=23)
     return {"cam": cam, "game_x": game_x, "cam_panel_h": cam_h}
 
 

@@ -32,8 +32,9 @@ import tempfile
 import time
 from typing import Dict, List, Optional, Tuple
 
-from .. import proc
+from .. import accel, proc
 from ..config import LOCAL_OUTPUT_DIR, LOCAL_OUTPUT_RESOLUTION
+from ..faces import detect as face_detect
 from ..render import LOUDNESS_FILTER
 
 # How often faces are looked for. The plan is interpolated between samples,
@@ -84,18 +85,23 @@ def _ratio(aspect_ratio: str) -> float:
 
 def _cut_subclip(source_path: str, start: float, end: float, out_path: str) -> str:
     """ffmpeg -ss start -to end → re-encoded mp4 with audio."""
-    cmd = [
+    # Intermediate only — the reframe step re-encodes this, so favour speed
+    # at near-transparent quality instead of spending time on compression.
+    #
+    # -ss before -i, and a duration rather than an end time. After -i it is an
+    # output seek: ffmpeg decodes the source from the very beginning and
+    # throws frames away until it reaches the start -- on a clip 28 minutes
+    # into a stream, that was most of a minute spent on nothing, on every
+    # face-follow clip. Before -i it seeks the input, and a re-encode still
+    # starts on the exact frame.
+    accel.run_encode(lambda enc: [
         "ffmpeg", "-y", "-loglevel", "error",
-        "-i", source_path,
-        "-ss", f"{start:.3f}",
-        "-to", f"{end:.3f}",
-        # Intermediate only — the reframe step re-encodes this, so favour speed
-        # at near-transparent quality instead of spending time on compression.
-        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "18",
+        "-ss", f"{start:.3f}", "-i", source_path,
+        "-t", f"{max(0.1, end - start):.3f}",
+        *enc,
         "-c:a", "aac", "-b:a", "128k",
         out_path,
-    ]
-    proc.run_checked(cmd, what="ffmpeg (cut subclip)")
+    ], what="ffmpeg (cut subclip)", crf=18, preset="ultrafast")
     return out_path
 
 
@@ -108,37 +114,6 @@ def _crop_size(src_w: int, src_h: int, target_ratio: float) -> Tuple[int, int]:
         crop_w = src_w
         crop_h = int(crop_w / target_ratio)
     return max(2, crop_w - (crop_w % 2)), max(2, crop_h - (crop_h % 2))
-
-
-def _cascades():
-    import cv2  # type: ignore
-    root = cv2.data.haarcascades
-    return (cv2.CascadeClassifier(root + "haarcascade_frontalface_default.xml"),
-            cv2.CascadeClassifier(root + "haarcascade_profileface.xml"))
-
-
-def _faces_in(gray, frontal, profile) -> List[Tuple[float, float, float]]:
-    """(centre x, centre y, width) of every face, in detection-copy pixels.
-
-    Profile faces are looked for only when no frontal one is found, and in
-    both directions -- the cascade only knows one side, so the frame is
-    mirrored for the other. Someone turning to talk to a co-host is exactly
-    when a frontal-only detector loses them.
-    """
-    import cv2  # type: ignore
-    h, w = gray.shape[:2]
-    min_side = max(24, int(w * 0.04))
-    found = frontal.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=6,
-                                     minSize=(min_side, min_side))
-    boxes = [tuple(map(float, f)) for f in found]
-    if not boxes:
-        for flipped in (False, True):
-            img = cv2.flip(gray, 1) if flipped else gray
-            for (x, y, fw, fh) in profile.detectMultiScale(
-                    img, scaleFactor=1.1, minNeighbors=6, minSize=(min_side, min_side)):
-                x = (w - x - fw) if flipped else x
-                boxes.append((float(x), float(y), float(fw), float(fh)))
-    return [(x + fw / 2, y + fh / 2, fw) for (x, y, fw, fh) in boxes]
 
 
 def track_faces(path: str) -> Tuple[List[float], List[Optional[Tuple[float, float, float]]],
@@ -158,7 +133,6 @@ def track_faces(path: str) -> Tuple[List[float], List[Optional[Tuple[float, floa
     fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
     step = max(1, int(round(fps / DETECT_PER_SECOND)))
     scale = DETECT_WIDTH / src_w if src_w > DETECT_WIDTH else 1.0
-    frontal, profile = _cascades()
 
     times: List[float] = []
     track: List[Optional[Tuple[float, float, float]]] = []
@@ -177,12 +151,13 @@ def track_faces(path: str) -> Tuple[List[float], List[Optional[Tuple[float, floa
             index += 1
             if not ok:
                 break
-            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            if scale < 1.0:
-                gray = cv2.resize(gray, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
-            gray = cv2.equalizeHist(gray)
+            # This pass runs in-process, where Pause cannot suspend it the way
+            # it suspends ffmpeg; holding here between frames is how it stops.
+            proc.wait_if_paused()
+            small = (cv2.resize(frame, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
+                     if scale < 1.0 else frame)
             faces = [(cx / scale, cy / scale, fw / scale)
-                     for cx, cy, fw in _faces_in(gray, frontal, profile)]
+                     for cx, cy, fw, _ in face_detect(small, min_fraction=0.04)]
             times.append((index - 1) / fps)
 
             if not faces:
@@ -370,17 +345,17 @@ def _reframe_vertical(in_path: str, out_path: str, aspect_ratio: str,
         _write_commands(plan, fps, cmds)
         graph = (f"[0:v]sendcmd=f='{_filter_path(cmds)}',"
                  f"crop@fx=w={crop_w}:h={crop_h}:x={x0}:y={y0}{scale},setsar=1[v]")
-        proc.run_checked([
+        accel.run_encode(lambda enc: [
             "ffmpeg", "-y", "-loglevel", "error",
             "-i", in_path,
             "-filter_complex", graph,
             "-map", "[v]", "-map", "0:a:0?",
             "-af", LOUDNESS_FILTER,
-            "-c:v", "libx264", "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p",
+            *enc,
             "-c:a", "aac", "-b:a", "160k",
             "-movflags", "+faststart",
             out_path,
-        ], what="ffmpeg (face-tracked reframe)")
+        ], what="ffmpeg (face-tracked reframe)", crf=20)
     finally:
         shutil.rmtree(work, ignore_errors=True)
     return out_path
