@@ -1267,6 +1267,8 @@ function haystack(c, r) {
   return [
     c.title, seo.title, seo.description, seo.hook_text,
     c.hook_sentence, c.first_line, c.virality_reason,
+    (seo.about || {}).subject, (seo.about || {}).genre, c.subject_override,
+    (c.scene || {}).scene,
     (seo.tags || []).join(" "), (seo.hashtags || []).join(" "),
     c.file, r && r.source_title,
   ].filter(Boolean).join(" ").toLowerCase();
@@ -1300,6 +1302,9 @@ function clipCard(c) {
   const sub = (seo && seo.hook_text) || c.hook_sentence
     || (c.start_time != null ? `${clock(c.start_time)} → ${clock(c.end_time)}` : "");
   const rank = c.rank || c.index;
+  // What the clip is filed under, on the card itself, so a clip labelled with
+  // the wrong game is visible at a glance instead of only after upload.
+  const filed = c.subject_override || (seo && seo.about && seo.about.subject) || "";
   return `
     <div class="clip" data-i="${i}" style="animation-delay:${Math.min(i, 12) * 45}ms">
       <div class="thumb">
@@ -1313,6 +1318,7 @@ function clipCard(c) {
           ${c.muted ? `<span>muted</span>` : ""}
           ${c.saved_to ? `<span>saved</span>` : ""}
           ${!seo ? `<span class="need">no title yet</span>` : ""}
+          ${filed ? `<span class="subj">${esc(filed)}</span>` : ""}
         </div>
       </div>
       <div class="ct">${esc(title)}</div>
@@ -1620,12 +1626,34 @@ function renderSeo() {
     return;
   }
 
+  const options = seo.title_options || [];
+  const tagOptions = seo.tag_options || [];
   box.innerHTML =
-    seoField("Title — paste into YouTube's title box", "sfTitle", seo.title, { count: 100 })
+    aboutField(c, seo)
+    + seoField("Title — paste into YouTube's title box", "sfTitle", seo.title, { count: 100 })
+    + (options.length > 1 ? `
+      <div class="sf">
+        <div class="sf-top"><span>Title options, best first — tap one to use it</span></div>
+        <div class="topts">${options.map((o, k) => `
+          <button class="topt${o.title === seo.title ? " on" : ""}" data-topt="${k}"
+            title="${esc(scoreNote(o))}">
+            <b>${esc(o.score)}</b><span>${esc(o.title)}</span><i>${esc(o.angle || "")}</i>
+          </button>`).join("")}</div>
+      </div>` : "")
     + seoField("Description", "sfDesc", seo.description, { multiline: true, rows: 8 })
     + seoField("Tags — paste into the tags box", "sfTags", (seo.tags || []).join(", "),
                { multiline: true, rows: 3 })
+    + (tagOptions.length ? `
+      <div class="sf">
+        <div class="sf-top"><span>More tags, best first — tap to add or remove</span>
+          <i class="sf-count" id="sfTagCount"></i></div>
+        <div class="tchips">${tagOptions.map((o, k) => `
+          <button class="tchip" data-tchip="${k}" title="${esc(o.kind || "")}">${esc(o.tag)}</button>`
+        ).join("")}</div>
+      </div>` : "")
     + seoField("On-screen hook for the first 2 seconds", "sfHook", seo.hook_text)
+    + (seo.search_phrase
+        ? `<p class="seo-why"><b>Ranks for:</b> ${esc(seo.search_phrase)}</p>` : "")
     + (seo.why_it_works
         ? `<p class="seo-why"><b>Why this one travels:</b> ${esc(seo.why_it_works)}</p>` : "")
     + (seo.generated === false
@@ -1644,7 +1672,9 @@ function renderSeo() {
 
   // The fields are editable — tweak a title before copying it — so the count
   // has to follow along, since 100 characters is a hard YouTube limit.
-  const count = box.querySelector(".sf-count");
+  // The title's own counter, looked up from the title box: the panel has
+  // other badges now, and the first one in it is not this one.
+  const count = $("sfTitle").closest(".sf").querySelector(".sf-count");
   if (count) {
     $("sfTitle").addEventListener("input", () => {
       count.textContent = `${$("sfTitle").value.length}/100`;
@@ -1658,10 +1688,96 @@ function renderSeo() {
   seoDirty = false;
   $("seoSave").disabled = true;
   $("seoSave").textContent = "Save changes";
-  ["sfTitle", "sfDesc", "sfTags", "sfHook"].forEach((id) => {
+  ["sfSubject", "sfTitle", "sfDesc", "sfTags", "sfHook"].forEach((id) => {
     const el = $(id);
     if (el) el.addEventListener("input", markSeoDirty);
   });
+
+  // A ranked option goes into the title box rather than straight to disk, so
+  // it can be tweaked first and is kept by the same Save as a typed title.
+  box.querySelectorAll("[data-topt]").forEach((b) => {
+    b.onclick = () => {
+      const o = options[+b.dataset.topt];
+      if (!o) return;
+      $("sfTitle").value = o.title;
+      $("sfTitle").dispatchEvent(new Event("input"));
+      box.querySelectorAll("[data-topt]").forEach((x) => x.classList.toggle("on", x === b));
+    };
+  });
+
+  // The chips and the tag box are one list seen two ways: toggling a chip
+  // edits the box, and typing in the box relights the chips.
+  const tagsBox = $("sfTags");
+  const current = () => tagsBox.value.split(",").map((t) => t.trim().toLowerCase()).filter(Boolean);
+  const paintChips = () => {
+    const have = new Set(current());
+    box.querySelectorAll("[data-tchip]").forEach((b) => {
+      const o = tagOptions[+b.dataset.tchip];
+      b.classList.toggle("on", !!o && have.has(o.tag));
+    });
+    const count = $("sfTagCount");
+    if (count) {
+      // YouTube counts the commas between tags against its 500 too.
+      const used = current().join(",").length;
+      count.textContent = `${used}/500`;
+      count.classList.toggle("over", used > 500);
+    }
+  };
+  box.querySelectorAll("[data-tchip]").forEach((b) => {
+    b.onclick = () => {
+      const o = tagOptions[+b.dataset.tchip];
+      if (!o) return;
+      const have = current();
+      tagsBox.value = (have.includes(o.tag) ? have.filter((t) => t !== o.tag) : [...have, o.tag])
+        .join(", ");
+      paintChips();
+      markSeoDirty();
+    };
+  });
+  tagsBox.addEventListener("input", paintChips);
+  paintChips();
+}
+
+// What the clip was filed under, and a box to put it right. The app names a
+// game only when something on screen or in the clip confirms it; a person
+// who knows better types the real name here and every rewrite after uses it.
+function aboutField(c, seo) {
+  const a = seo.about || {};
+  const scene = c.scene || {};
+  const kind = (a.content_type || scene.content_type || "").replace(/_/g, " ");
+  const genre = a.genre || scene.genre || "";
+  const by = {
+    you: "you set this", on_screen_text: "named on screen", speech: "said in the clip",
+    source_listing: "from the video's title", unmistakable: "recognised on screen",
+    mentioned_in_video: "matches a name said in the video", frames: "seen on screen",
+  }[a.by] || "";
+  let hint;
+  if (c.subject_override) {
+    hint = `Filed under ${esc(c.subject_override)} because you said so.`;
+  } else if (a.confirmed && a.subject) {
+    hint = `Filed under <b>${esc(a.subject)}</b>${by ? ` — ${esc(by)}` : ""}. Wrong? Type the real name and hit Rewrite.`;
+  } else if (a.guess) {
+    hint = `Looks like it could be ${esc(a.guess)}, but nothing on screen confirms it, so the titles
+      say ${genre ? `“${esc(genre)}”` : "what happens"} instead. Type the real name and hit Rewrite.`;
+  } else {
+    hint = "Not named. Type what this is — a game, a show, a topic — and hit Rewrite.";
+  }
+  return `
+    <div class="sf">
+      <div class="sf-top"><span>What's in this clip</span>
+        ${kind ? `<i class="sf-count">${esc(kind)}${genre ? ` · ${esc(genre)}` : ""}</i>` : ""}</div>
+      <input id="sfSubject" type="text" spellcheck="false" maxlength="80"
+        value="${esc(c.subject_override || "")}"
+        placeholder="${esc(a.subject || a.guess || "e.g. Fear to Fathom")}">
+      <p class="sf-hint">${hint}</p>
+    </div>`;
+}
+
+function scoreNote(o) {
+  const parts = [`Score ${o.score}/100`];
+  if (o.model_score != null) parts.push(`editor rubric ${o.model_score}`);
+  if (o.check_score != null) parts.push(`length, subject and filler check ${o.check_score}`);
+  return parts.join(" · ");
 }
 
 let seoDirty = false;
@@ -1686,12 +1802,13 @@ async function saveSeo() {
       description: $("sfDesc").value,
       tags: $("sfTags").value,
       hook_text: $("sfHook").value,
+      subject: $("sfSubject") ? $("sfSubject").value : undefined,
     };
     const d = await api(
       `/api/jobs/${encodeURIComponent(jobOf(c))}/clips/${encodeURIComponent(c.file)}/seo`,
       json("PUT", body));
     const renamed = d.file && d.file !== c.file;
-    patchClip(cur, { seo: d.seo, file: d.file, url: d.url });
+    patchClip(cur, { seo: d.seo, file: d.file, url: d.url, subject_override: d.subject_override });
     if (renamed) {
       const at = vid.currentTime, playing = !vid.paused;
       vid.src = `${d.url}?v=${Date.now()}`;
@@ -1757,14 +1874,28 @@ async function rewriteSeo() {
   busy(true, "Writing the title and tags…");
   $("seoMsg").innerHTML = "";
   try {
+    // A name typed into "What's in this clip" is the reason to rewrite, so it
+    // is saved first -- otherwise the rewrite would file the clip under the
+    // very guess it was meant to correct.
+    const typed = $("sfSubject") ? $("sfSubject").value.trim() : null;
+    if (typed !== null && typed !== (c.subject_override || "")) {
+      const s = await api(
+        `/api/jobs/${encodeURIComponent(jobOf(c))}/clips/${encodeURIComponent(c.file)}/seo`,
+        json("PUT", { subject: typed }));
+      patchClip(cur, { subject_override: s.subject_override });
+    }
+    // Just this clip. The rest of the run keeps its titles, and is sent along
+    // so the new one does not open the same way as any of them.
     const d = await api(
-      `/api/jobs/${encodeURIComponent(jobOf(c))}/seo?force=true`, { method: "POST" });
+      `/api/jobs/${encodeURIComponent(jobOf(c))}/seo?force=true&only=${encodeURIComponent(c.file)}`,
+      { method: "POST" });
     // Match on index, not on filename. A rewrite renames the mp4 to its new
     // title, so every x.file coming back is the *new* name -- matching the
     // old one finds nothing, silently, and leaves the card holding a url
     // whose file no longer exists. That is a 404, which the <video> reports
     // as a black frame and MEDIA_ERR_SRC_NOT_SUPPORTED.
-    const fresh = (x) => ({ seo: x.seo, file: x.file, url: x.url, title: x.title });
+    const fresh = (x) => ({ seo: x.seo, file: x.file, url: x.url, title: x.title,
+                            scene: x.scene, subject_override: x.subject_override });
     const mine = (d.clips || []).find((x) => x.index === c.index);
     if (mine) patchClip(cur, fresh(mine));
     // Everything else in that run was rewritten too — take the new copy.

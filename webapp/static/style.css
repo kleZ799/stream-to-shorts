@@ -1190,6 +1190,51 @@ label.fld > span a:hover { text-decoration: underline; }
 .sf input:focus,
 .sf textarea:focus { outline: none; border-color: var(--blue); }
 
+.sf-hint { color: var(--text-3); font-size: 11.5px; line-height: 1.5; margin: 6px 0 0; }
+.sf-hint b { color: var(--text-2); font-weight: 600; }
+
+/* Ranked title options: the score leads, so the order reads at a glance. */
+.topts { display: flex; flex-direction: column; gap: 6px; }
+.topt {
+  display: grid;
+  grid-template-columns: 34px 1fr;
+  grid-template-rows: auto auto;
+  align-items: center;
+  column-gap: 10px;
+  text-align: left;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  color: var(--text);
+  padding: 8px 10px;
+  font: 400 12.5px/1.4 inherit;
+  cursor: pointer;
+}
+.topt:hover { border-color: var(--edge); background: var(--hover); }
+.topt.on { border-color: var(--blue); }
+.topt b {
+  grid-row: 1 / span 2;
+  font: 600 13px/1 inherit;
+  color: var(--text-2);
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.topt.on b { color: var(--blue); }
+.topt i { font-style: normal; font-size: 10.5px; color: var(--text-3); text-transform: lowercase; }
+
+.tchips { display: flex; flex-wrap: wrap; gap: 6px; }
+.tchip {
+  border: 1px dashed var(--line);
+  background: transparent;
+  color: var(--text-3);
+  border-radius: var(--pill);
+  padding: 3px 9px;
+  font: 500 11.5px/1.3 inherit;
+  cursor: pointer;
+}
+.tchip:hover { color: var(--text); border-color: var(--edge); }
+.tchip.on { border-style: solid; border-color: var(--blue); color: var(--text); background: var(--raised-2); }
+
 .seo-empty { color: var(--text-2); font-size: 13px; line-height: 1.6; margin-bottom: 16px; }
 .seo-why {
   color: var(--text-3);
