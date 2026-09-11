@@ -177,9 +177,10 @@ class LayoutSpec:
         """A caveat worth showing before the user commits to a long render."""
         if self.layout == "facetrack":
             return (
-                "Heads up: this mode inspects every single frame, so it renders "
-                "roughly 20× slower than the other two — minutes per clip on a "
-                "high-resolution source. Use it for talking-head footage; for "
+                "Heads up: this mode reads every frame to follow the face "
+                "smoothly, so it renders roughly 9× slower than a plain crop — "
+                "about a minute and a half per 30-second clip on a 720p source, "
+                "more at 1440p. Use it for full-frame face cams and podcasts; for "
                 "streams, 'webcam on top' looks better and finishes far sooner."
             )
         return None
