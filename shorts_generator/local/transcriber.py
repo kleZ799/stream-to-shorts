@@ -284,7 +284,8 @@ def transcribe_local(media_path: str, language: Optional[str] = None) -> Dict:
         accel.mark_cuda_failed()
         print(f"[transcribe/local] the GPU stopped partway "
               f"({str(e).splitlines()[0][:120]}) - finishing on the CPU. If this "
-              f"keeps happening, set Processor to CPU in Settings", flush=True)
+              f"keeps happening, set Processor to CPU only, under the live "
+              f"preview", flush=True)
         device, compute_type = "cpu", "int8"
         segments, info = _run(device, compute_type)
 

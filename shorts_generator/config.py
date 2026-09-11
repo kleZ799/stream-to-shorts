@@ -106,7 +106,7 @@ def current_provider() -> str:
 def current_processor() -> str:
     """auto / gpu / cpu -- what does the heavy work. See accel.py.
 
-    Re-read at call time like the provider, so a change made in Settings --
+    Re-read at call time like the provider, so a change made in the app --
     even while a run is paused -- applies from the next clip.
     """
     from . import user_config

@@ -244,7 +244,7 @@ def whisper_device(register: Optional[Callable[[], None]] = None) -> Tuple[str, 
 
 
 def status() -> Dict:
-    """What each stage will run on, for the Settings panel.
+    """What each stage will run on, for the Processor box under the preview.
 
     Finding the encoder means running ffmpeg, and ffmpeg waits while a job is
     paused -- so opening Settings on a paused run would hang the panel on a

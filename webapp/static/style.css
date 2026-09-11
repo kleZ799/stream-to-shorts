@@ -1277,6 +1277,11 @@ body.drawer-on .drawer { transform: none; }
 .d-head h2 svg { width: 20px; height: 20px; }
 .d-head .ibtn { margin-left: auto; }
 
+/* The Processor choice, under the live preview. */
+.proc { border-top: 1px solid var(--line); margin-top: 16px; padding-top: 16px; }
+.proc h3 { font: 500 14px/1 inherit; margin-bottom: 12px; }
+.proc .kv { margin-bottom: 6px; }
+
 .d-sec { border-top: 1px solid var(--line); padding: 18px 0; }
 .d-sec h3 { font: 500 14px/1 inherit; margin-bottom: 12px; }
 

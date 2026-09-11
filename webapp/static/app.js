@@ -204,7 +204,6 @@ function openDrawer() {
   body.classList.add("drawer-on");
   loadLocations();
   loadCleanup();
-  loadProcessor();
 }
 $("settingsBtn").onclick = openDrawer;
 $("gSettings").onclick = openDrawer;
@@ -250,9 +249,10 @@ async function checkSetup() {
 
 // ---------------------------------------------------------------- processor
 
-// What does the heavy work, and why. Asked fresh every time the drawer opens:
-// the answer is found by trying things (a one-second test encode), and a run
-// can change it -- an encoder that fails mid-run is dropped for that run.
+// What does the heavy work, and why. Shown under the live preview, asked once
+// when the page opens and again after every run: the answer is found by
+// trying things (a one-second test encode), and a run can change it -- an
+// encoder that fails mid-run is dropped for that run.
 async function loadProcessor(recheck = false) {
   const info = $("procInfo");
   try {
@@ -1294,6 +1294,9 @@ async function finish(s) {
   // The run just spent requests — including the failed ones, which is exactly
   // when knowing what is left matters most.
   refreshUsage();
+  // And it may have changed what the heavy work runs on: an encoder that
+  // failed mid-run is dropped for that run, and the panel should say so.
+  loadProcessor();
 
   const made = (s.clips || []).filter((c) => c.url).length;
   offerRetry(s, made);
@@ -2302,6 +2305,7 @@ $("pMini").onclick = () => {
 keyLinkFor($("setProvider").value);
 checkSetup();
 refreshUsage();
+loadProcessor();
 loadLocations();
 refreshPreview();
 
