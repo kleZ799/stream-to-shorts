@@ -111,6 +111,8 @@ failing, and the panel says in plain words what is being used and why. If a
 graphics driver keeps misbehaving, **CPU only** never touches it. The choice
 applies from the next clip, even on a paused run.
 
+<img src="assets/screenshots/06-processor.png" alt="Settings, Processor section: Automatic selected, video encoding on the NVIDIA GPU (NVENC), transcription on the NVIDIA GPU (CUDA)" width="880">
+
 ### Your clips folder is readable
 
 Runs are filed under the **title of the video they came from**, with the date,
@@ -531,18 +533,18 @@ lists its authors as contributors here — their commits are genuinely in this
 repo's history, and the licence keeps them credited.
 
 Rather than assert a boundary, here is the measured one. `git blame` over every
-text file in the current tree, 24,094 lines (re-measured at v1.11.2):
+text file in the current tree, 25,072 lines (re-measured at v1.12.0):
 
 | | Lines | Share |
 |---|---:|---:|
-| **Parth Bhadana** | **22,665** | **94.1%** |
-| Anil Matcha (base) | 1,106 | 4.6% |
+| **Parth Bhadana** | **23,659** | **94.4%** |
+| Anil Matcha (base) | 1,097 | 4.4% |
 | Arael Espinosa | 194 | 0.8% |
-| LathissKhumar | 129 | 0.5% |
+| LathissKhumar | 122 | 0.5% |
 
-Code only, excluding documentation: **93.3%** mine. Since the fork point
-(`c30376e`, 29 Jul 2026): **190 commits**, **+22,654 / −413 lines**, and
-**58 of the 79 files** now in the repo did not exist before.
+Code only, excluding documentation: **93.7%** mine. Since the fork point
+(`c30376e`, 29 Jul 2026): **198 commits**, **+23,648 / −429 lines**, and
+**64 of the 85 files** now in the repo did not exist before.
 
 Run `git blame` yourself — that is rather the point of quoting a number instead
 of a claim.
@@ -789,7 +791,8 @@ python build_exe.py --onefile --clean
 
 Put `ffmpeg.exe` and `ffprobe.exe` in a `./bin` folder first and they get bundled,
 which is how the published build needs nothing installed. That's what makes it
-219 MB; without them it's 153 MB and ffmpeg has to be on the user's PATH. Drop
+220 MB; without them it's 153 MB and ffmpeg has to be on the user's PATH. The
+YuNet face model in `assets/models` is bundled either way. Drop
 `--onefile` for a folder build that starts faster but has to be zipped to share.
 
 On a Mac the same command without `--onefile` produces `dist/StreamToShorts.app`:

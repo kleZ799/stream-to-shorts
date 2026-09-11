@@ -48,7 +48,11 @@ anyone.
 13. [Configuration and precedence](#13-configuration-and-precedence)
 14. [Quota accounting and provider fallback](#14-quota-accounting-and-provider-fallback)
 15. [Caching: five independent layers](#15-caching-five-independent-layers)
-16. [Packaging into a Windows .exe](#16-packaging-into-a-windows-exe)
+    - 15b. [Two themes out of one set of rules](#15b-two-themes-out-of-one-set-of-rules)
+16. [Packaging: a Windows .exe, a mac .app, a Linux binary](#16-packaging-a-windows-exe-a-mac-app-a-linux-binary)
+    - 16a. [Subprocesses: windows, and stopping them](#16a-subprocesses-windows-and-stopping-them)
+    - 16b. [Shipping updates to an installed .exe](#16b-shipping-updates-to-an-installed-exe)
+    - 16c. [Telling somebody a run has finished](#16c-telling-somebody-a-run-has-finished)
 
 **Reference**
 17. [Rough edges and stale docs](#17-rough-edges-and-stale-docs)
@@ -138,7 +142,7 @@ Two fixes, and they are the two most interesting parts of the codebase:
 | Video processing | **ffmpeg** (subprocess) | Single-pass filter graphs do crop/scale/stack without touching frames in Python |
 | Computer vision | **OpenCV** — **YuNet** (`FaceDetectorYN`), Haar as fallback — + **NumPy** | A 230 KB learned face detector shipped in the build, no GPU needed; overlay borders from statistics over a stack of frames |
 | Hardware encoding | ffmpeg's **NVENC / VideoToolbox / Quick Sync / AMF** | Encoding on the graphics chip when one really works — each is test-encoded before use — with libx264 as the fallback |
-| Frontend | **Vanilla JS + CSS**, no framework | Zero build step, ~3.5k lines total, ships as three static files inside the exe |
+| Frontend | **Vanilla JS + CSS**, no framework | Zero build step, ~5.2k lines total, ships as static files inside the build |
 | Live updates | **Server-Sent Events** | One-directional server→client is exactly the shape of progress reporting; simpler than WebSockets |
 | Desktop shell | **pywebview** (Edge WebView2) | A native window with no address bar, using a browser engine Windows already has |
 | Packaging | **PyInstaller** | Single-file .exe with ffmpeg bundled — the user installs nothing |
@@ -1638,6 +1642,10 @@ Reads `/api/settings` and `/api/usage` to render:
   choice is made with the number in view.
 - **Budget meters** — requests used today vs the daily cap, and time until reset
 - Save-location picker and the disk cleanup scanner
+- **Processor** — Automatic, GPU or CPU only, with what video encoding and
+  transcription will actually run on and why, read from `GET /api/processor`
+  each time the drawer opens ([§7.5](#75-which-processor--accelpy)). "Check
+  again" re-runs the encoder tests, for someone who has just installed a driver
 
 If a setting is pinned by an environment variable, the API reports
 `provider_pinned` / `model_pinned` and the UI says so — the difference between a
@@ -1702,9 +1710,10 @@ onto a silently-empty dict would drop the API key it holds. It raises instead of
 destroying the thing it was asked to update. It also `chmod 600`s the file where
 that's meaningful.
 
-**Live re-reading.** `current_provider()` and `current_model()` go through
-`user_config` on every call, so switching provider in the UI takes effect on the
-next request without a restart.
+**Live re-reading.** `current_provider()`, `current_model()` and
+`current_processor()` go through `user_config` on every call, so switching
+provider takes effect on the next request and switching processor on the next
+clip — even partway through a paused run — without a restart.
 
 ### Where things land
 

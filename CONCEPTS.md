@@ -39,6 +39,10 @@ engineering is.
 10. [CS: reliability and failure design](#10-cs-reliability-and-failure-design)
 11. [CS: security boundaries](#11-cs-security-boundaries)
 12. [CS: operating systems and packaging](#12-cs-operating-systems-and-packaging)
+    - 12a. [Process control, and trust as a UX property](#12a-cs-process-control-and-trust-as-a-ux-property)
+    - 12b. [Indirection, and the things it must not reach](#12b-cs-indirection-and-the-things-it-must-not-reach)
+    - 12c. [Software distribution and self-update](#12c-cs-software-distribution-and-self-update)
+    - 12d. [Absence as a signal](#12d-cs-absence-as-a-signal)
 13. [CS: internationalisation](#13-cs-internationalisation)
 14. [Questions you should expect](#14-questions-you-should-expect)
 15. [What you would do next](#15-what-you-would-do-next)
@@ -906,6 +910,15 @@ and a gate on what starts next. Either alone leaves half the work going, and
 the race between them — a child started in the instant after the gate was
 checked — has to be closed deliberately rather than assumed away.
 
+And suspension only reaches *processes*. Work done inside the app itself — here
+Whisper's transcription and the face-tracking pass — has no process to suspend,
+so it needs **cooperative** pausing instead: a checkpoint in its loop that
+blocks on the same gate. Whisper's generator is lazy, so blocking between
+segments stops it decoding the next window, on a CPU or a GPU alike. That is
+the general split: pre-emptive control for what the OS owns, cooperative
+checkpoints for what your own loop owns, and a pause button is only honest if
+it has both.
+
 **Inherited environment.** A GUI process has no console, so the OS creates one
 whenever it starts a console program. That is not a bug in either program; it
 is what happens when a design assumption (programs have a terminal) meets a
@@ -929,7 +942,7 @@ interface. Keeping both — a readable name outside, the id in a manifest inside
 
 ---
 
-## 12a. CS: indirection, and the things it must not reach
+## 12b. CS: indirection, and the things it must not reach
 
 **The concept.** A theme is the textbook use of one level of indirection:
 name every colour, then swap what the names point at. The interesting part is
@@ -966,7 +979,7 @@ different result, because the surround differs. Themes are not inversions.
 
 ---
 
-## 12b. CS: software distribution and self-update
+## 12c. CS: software distribution and self-update
 
 **The concept.** Getting software onto a machine and keeping it current are
 different problems. Packaging solves the first. The second is only interesting
@@ -1034,7 +1047,7 @@ need one manual download. Worth stating plainly rather than discovering.
 
 ---
 
-## 12c. CS: absence as a signal
+## 12d. CS: absence as a signal
 
 **The problem.** A render finishes. Should the app interrupt you about it? Only
 if you are not already looking at it — and a server process cannot see its own
@@ -1119,7 +1132,12 @@ Follow [§2](#2-the-system-in-one-picture) top to bottom. Mention the caches.
 **"Why is it slow?"**
 Transcription dominates — it is the only stage proportional to *video length*
 rather than clip count. Which is why it is cached, and why the GPU path was
-worth fixing (104s → 21s on 900s of audio).
+worth fixing (104s → 21s on 900s of audio). Rendering is the rest, and the
+Processor setting moves it onto the graphics chip where one really works —
+measured 2× on the stacked layout. But the biggest single speed-up was not a
+GPU at all: face-follow was decoding the whole stream up to every clip because
+of where one `-ss` sat, and moving it made that layout 5× faster. Profile the
+stage before buying hardware for it.
 
 **"How do you handle a 4-hour video when the context window is smaller?"**
 Chunking with overlap, per-chunk checkpointing, then dedupe across chunks.
