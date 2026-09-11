@@ -196,6 +196,34 @@ _PREFIX_STAGE = [
     (r"^\[stack|^\[clip/local|^\[center|^\[render", "render"),
 ]
 
+# How many times a stage is tried before the run gives up on it. A download
+# from a busy host, a transcription that runs out of memory once, a render
+# that trips over a file Windows has not let go of yet -- none of these fail
+# the same way twice as a rule, and a run that has already paid for every
+# stage before the one that failed should not be lost to it. Backing off 5s,
+# then 15s.
+STAGE_ATTEMPTS = 3
+# A clip that fails to render gets this many tries of its own.
+CLIP_ATTEMPTS = 3
+
+# Failures that trying again cannot fix. Retrying these only makes someone
+# wait longer to read the same message, so they fail straight away -- the
+# Retry button is still there once whatever it was has been put right.
+_PERMANENT = (
+    "api_key_invalid", "api key not valid", "permission_denied", "unauthenticated",
+    "private video", "video unavailable", "unsupported url", "is not a valid url",
+    "sign in to confirm", "members-only", "join this channel",
+    "local file path does not exist",
+)
+
+
+def _is_permanent(e: BaseException) -> bool:
+    from shorts_generator.local.llm import DailyQuotaExceeded
+    if isinstance(e, DailyQuotaExceeded):
+        return True
+    msg = str(e).lower()
+    return any(t in msg for t in _PERMANENT)
+
 
 @dataclass
 class Job:
@@ -223,6 +251,8 @@ class Job:
     # so moving the save location can't strand the ones already rendered.
     folder: Optional[str] = None
     restored: bool = False
+    # "full" runs every stage; "clips" re-renders only the clips that failed.
+    mode: str = "full"
     _version: int = 0
 
     @property
@@ -254,6 +284,11 @@ class Job:
             "shorts_dir": self.out_dir,
             "created_at": self.created_at,
             "restored": self.restored,
+            # What the page needs to offer a retry: how many clips did not
+            # render, and whether the video they come from is still here.
+            "failed": sum(1 for c in self.clips
+                          if not c.get("url") and c.get("start_time") is not None),
+            "source_on_disk": bool(self.source_path and os.path.exists(self.source_path)),
             "paused": self.status == "running" and proc.is_paused(),
             "log": self.log[-60:],
             "version": self._version,
@@ -345,6 +380,50 @@ class JobStore:
     def set_seo(self, job: Job, filename: str, seo: Dict) -> Optional[Dict]:
         """Attach freshly written upload metadata to one clip."""
         return self.replace_clip(job, filename, {"seo": seo})
+
+    def retry(self, job: Job) -> Job:
+        """Run a failed job again, from wherever its caches let it pick up.
+
+        Nothing already paid for is paid again: the download is cached, the
+        transcript is cached beside it, and the ranking checkpoints every
+        chunk. So "again" costs only the stage that failed and what follows.
+        """
+        with self._lock:
+            if job.status in ("queued", "running"):
+                raise ValueError("That run is still going.")
+            if job.status != "error":
+                raise ValueError("That run finished. Retry its failed clips instead.")
+            job.mode = "full"
+            job.status, job.stage, job.progress = "queued", "queued", 0.0
+            job.error = None
+            job.message = "Queued — trying again"
+            job.clips = []
+            job.log.append("--- trying again ---")
+            job._version += 1
+        self._queue.put(job.id)
+        return job
+
+    def retry_clips(self, job: Job) -> Job:
+        """Render again only the clips in a run that failed to render."""
+        with self._lock:
+            if job.status in ("queued", "running"):
+                raise ValueError("That run is still going.")
+            failed = [c for c in job.clips
+                      if not c.get("url") and c.get("start_time") is not None]
+            if not failed:
+                raise ValueError("Nothing in that run failed.")
+            if not job.source_path or not os.path.exists(job.source_path):
+                raise ValueError("The video those clips come from is no longer on this "
+                                 "PC, so they can't be rendered again. Run it again from "
+                                 "the start instead.")
+            job.mode = "clips"
+            job.status, job.stage, job.progress = "queued", "render", 0.0
+            job.error = None
+            job.message = f"Queued — rendering {len(failed)} clip(s) again"
+            job.log.append("--- rendering the failed clips again ---")
+            job._version += 1
+        self._queue.put(job.id)
+        return job
 
     # --- persistence ------------------------------------------------------
 
@@ -590,7 +669,97 @@ class JobStore:
         except Exception as e:  # noqa: BLE001 - a finished run stays finished
             print(f"[notify] skipped ({e.__class__.__name__}: {e})", flush=True)
 
+    def _attempt(self, what: str, fn, *args, **kwargs):
+        """Run one stage, trying again when it fails on something that might
+        not fail twice. Called inside the job's stdout capture, so every retry
+        is in the run's log with the reason for it."""
+        for attempt in range(1, STAGE_ATTEMPTS + 1):
+            try:
+                return fn(*args, **kwargs)
+            except Exception as e:
+                if attempt == STAGE_ATTEMPTS or _is_permanent(e):
+                    raise
+                wait = 5 * 3 ** (attempt - 1)
+                why = (str(e).strip().splitlines() or [e.__class__.__name__])[0][:160]
+                print(f"[retry] {what} failed ({why}) - trying again in {wait}s "
+                      f"(attempt {attempt + 1}/{STAGE_ATTEMPTS})", flush=True)
+                time.sleep(wait)
+
+    def _render(self, job: Job, source_path: str, top: List[Dict]) -> List[Dict]:
+        """Render every clip, then give each one that failed tries of its own.
+
+        The renderers already keep one broken clip from sinking the rest; this
+        stops it sinking itself. A retry renders under its own name, so a
+        half-written file from the failed attempt cannot be mistaken for it,
+        and _finalize renames every clip to its title anyway.
+        """
+        from shorts_generator.render import render_highlights
+
+        shorts = render_highlights(source_path, top, job.spec, out_dir=job.out_dir)
+        for attempt in range(2, CLIP_ATTEMPTS + 1):
+            failed = [i for i, s in enumerate(shorts) if not s.get("clip_url")]
+            if not failed:
+                break
+            wait = 5 * (attempt - 1)
+            print(f"[retry] {len(failed)} clip(s) did not render - trying again in "
+                  f"{wait}s (attempt {attempt}/{CLIP_ATTEMPTS})", flush=True)
+            time.sleep(wait)
+            for i in failed:
+                again = render_highlights(source_path, [top[i]], job.spec,
+                                          out_dir=job.out_dir,
+                                          name_prefix=f"short_{i + 1:02d}_try{attempt}")
+                shorts[i] = again[0]
+        return shorts
+
+    def _execute_clips(self, job: Job) -> None:
+        """Render a finished run's failed clips again, and put them in place."""
+        with self._lock:
+            job.status = "running"
+            job._version += 1
+            failed = [(k, dict(c)) for k, c in enumerate(job.clips)
+                      if not c.get("url") and c.get("start_time") is not None]
+        self._update(job, stage="render", frac=0.0, message=_STAGE_LABELS["render"])
+
+        keys = ("title", "start_time", "end_time", "score", "hook_sentence", "first_line",
+                "virality_reason", "hook_peak", "seo", "scene")
+        sink = _JobStdout(self, job)
+        with contextlib.redirect_stdout(sink):
+            shorts = self._render(job, job.source_path,
+                                  [{k: c.get(k) for k in keys} for _, c in failed])
+
+        fixed = 0
+        for (k, old), s in zip(failed, shorts):
+            path = s.get("clip_url")
+            if path:
+                name = rename_to_title(Path(job.out_dir), os.path.basename(path),
+                                       (old.get("seo") or {}).get("title")
+                                       or old.get("title") or "")
+                updates = {"file": name, "url": f"/api/jobs/{job.id}/clips/{name}",
+                           "error": None,
+                           "hook_replay_seconds": s.get("hook_replay_seconds")}
+                fixed += 1
+            else:
+                updates = {"error": s.get("error")}
+            with self._lock:
+                job.clips[k].update(updates)
+
+        ok = sum(1 for c in job.clips if c.get("url"))
+        left = len(failed) - fixed
+        with self._lock:
+            job.status = "done" if ok else "error"
+            job.stage = "done"
+            job.progress = 1.0
+            job.message = f"{ok} clip(s) ready" + (f" — {left} still failed" if left else "")
+            job.error = None if ok else "no clips rendered"
+            job._version += 1
+        if ok:
+            self._persist(job)
+
     def _execute(self, job: Job) -> None:
+        if job.mode == "clips":
+            self._execute_clips(job)
+            return
+
         from shorts_generator.boundaries import report as report_cuts
         from shorts_generator.highlights import get_highlights
         from shorts_generator.hook_open import budget as hook_budget
@@ -614,7 +783,8 @@ class JobStore:
 
         sink = _JobStdout(self, job)
         with contextlib.redirect_stdout(sink):
-            source_path = download_youtube_local(
+            source_path = self._attempt(
+                "the download", download_youtube_local,
                 job.source, fmt=job.download_format,
                 out_dir=str(user_config.source_dir()),
             )
@@ -658,7 +828,7 @@ class JobStore:
                            source=job.source, llm_fn=call_local_llm, subject=subject)
                 self._update(job, stage="render", frac=0.0,
                              message=_STAGE_LABELS["render"])
-                shorts = render_highlights(source_path, top, job.spec, out_dir=job.out_dir)
+                shorts = self._render(job, source_path, top)
                 self._finalize(job, shorts, all_highlights)
                 return
 
@@ -667,7 +837,8 @@ class JobStore:
             # other value pins it, so a stream in one language cannot drift
             # into another halfway through.
             spoken = (job.language or "").strip().lower()
-            transcript = transcribe_local(
+            transcript = self._attempt(
+                "transcription", transcribe_local,
                 source_path, language=None if spoken in ("", "auto") else spoken)
             if not transcript["segments"]:
                 raise RuntimeError(
@@ -688,7 +859,10 @@ class JobStore:
             # way transcript reuse already does: point at the same source and
             # the work you already paid for is still there.
             checkpoint = Path(source_path).with_suffix(".highlights.json")
-            result = get_highlights(transcript, num_clips=job.spec.num_clips,
+            # Checkpointed per chunk, so a retry here re-asks only for the
+            # chunks that never came back.
+            result = self._attempt("ranking", get_highlights,
+                                    transcript, num_clips=job.spec.num_clips,
                                     llm_fn=call_local_llm,
                                     checkpoint_path=checkpoint,
                                     clip_seconds=job.spec.clip_seconds,
@@ -728,7 +902,7 @@ class JobStore:
                        source=job.source, llm_fn=call_local_llm, subject=subject)
 
             self._update(job, stage="render", frac=0.0, message=_STAGE_LABELS["render"])
-            shorts = render_highlights(source_path, top, job.spec, out_dir=job.out_dir)
+            shorts = self._render(job, source_path, top)
 
         self._finalize(job, shorts, all_highlights)
 
@@ -793,6 +967,9 @@ class JobStore:
                 "signals": s.get("signals"),
                 "boundary_notes": s.get("boundary_notes"),
                 "hook_replay_seconds": s.get("hook_replay_seconds"),
+                # Where its loudest moment is, so a clip rendered again later
+                # still gets its cold open.
+                "hook_peak": s.get("hook_peak"),
                 # What the clip's frames showed. Kept so a rewrite months
                 # later files it under the same thing without looking again.
                 "scene": s.get("scene"),

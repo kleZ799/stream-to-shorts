@@ -1158,18 +1158,60 @@ async function run() {
     return;
   }
 
-  jobId = job.id;
+  follow(job.id);
+}
+$("go").onclick = run;
+
+// Watch a job to the end: a new run, or an old one sent round again.
+function follow(id) {
+  jobId = id;
   finished = null;
+  $("retryRow").classList.add("hidden");
   if (es) es.close();
-  es = new EventSource(`/api/jobs/${job.id}/stream`);
+  es = new EventSource(`/api/jobs/${id}/stream`);
   es.onmessage = (ev) => onUpdate(JSON.parse(ev.data));
   es.onerror = () => {
     // The stream drops when the job ends; fall back to one direct read.
     es.close();
-    fetch(`/api/jobs/${job.id}`).then((r) => r.json()).then(onUpdate).catch(() => {});
+    fetch(`/api/jobs/${id}`).then((r) => r.json()).then(onUpdate).catch(() => {});
   };
 }
-$("go").onclick = run;
+
+// A run that failed, or finished with clips missing, says so and offers to go
+// again. Every stage has already retried itself by the time this shows, so
+// what is left is usually something that needed fixing first -- and the
+// caches mean the second go starts where the first stopped.
+function offerRetry(s, made) {
+  const failed = s.failed || 0;
+  let mode = null;
+  if (s.status === "error" && !made) mode = "run";
+  else if (failed && s.source_on_disk) mode = "clips";
+  $("retryRow").classList.toggle("hidden", !mode);
+  if (!mode) return;
+  $("retryLabel").textContent = mode === "run" ? "Try again" : "Retry failed clips";
+  $("retryHint").textContent = mode === "run"
+    ? "Starts where it stopped: nothing already downloaded, transcribed or ranked is done twice."
+    : `${failed} clip${failed > 1 ? "s" : ""} did not render. Only ${
+        failed > 1 ? "those are" : "that one is"} rendered again.`;
+  $("retryBtn").onclick = () => retryRun(s.id, mode === "clips");
+}
+
+async function retryRun(id, clipsOnly) {
+  $("retryBtn").disabled = true;
+  showErr("");
+  try {
+    await api(`/api/jobs/${encodeURIComponent(id)}/retry${clipsOnly ? "?clips_only=true" : ""}`,
+              { method: "POST" });
+    $("go").disabled = true;
+    $("go").textContent = "Working…";
+    $("progress").classList.remove("hidden");
+    follow(id);
+  } catch (e) {
+    showErr(e.message);
+  } finally {
+    $("retryBtn").disabled = false;
+  }
+}
 
 function onUpdate(s) {
   // The server is the authority on this: a pause survives a page reload, and
@@ -1211,6 +1253,7 @@ async function finish(s) {
   refreshUsage();
 
   const made = (s.clips || []).filter((c) => c.url).length;
+  offerRetry(s, made);
   if (s.error && !made) {
     showErr(s.error);
     return;

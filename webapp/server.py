@@ -1000,6 +1000,25 @@ async def save_clip(job_id: str, filename: str, req: SaveClipRequest) -> dict:
 
 
 
+# --- trying again ---------------------------------------------------------
+
+@app.post("/api/jobs/{job_id}/retry")
+async def retry_job(job_id: str, clips_only: bool = False) -> dict:
+    """Run a failed job again, or only the clips in a finished one that failed.
+
+    Every stage already retries itself before giving up, so reaching here
+    means something failed three times -- often something that has since been
+    put right (a key fixed, a connection back, disk space freed). The caches
+    make the second go start where the first stopped.
+    """
+    job = _job_or_404(job_id)
+    try:
+        job = STORE.retry_clips(job) if clips_only else STORE.retry(job)
+    except ValueError as e:
+        raise HTTPException(409, str(e))
+    return job.snapshot()
+
+
 # --- pausing a run --------------------------------------------------------
 
 @app.post("/api/jobs/{job_id}/pause")
