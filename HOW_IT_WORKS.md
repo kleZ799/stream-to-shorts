@@ -214,7 +214,8 @@ shorts_generator/
 └── local/
     ├── downloader.py       yt-dlp, download cache, channel listing, metadata
     ├── transcriber.py      faster-whisper + .srt cache
-    ├── llm.py              Gemini / OpenAI dispatch, retries, quota fallback
+    ├── llm.py              Gemini / Groq / OpenAI / local-server dispatch,
+    │                       retries, quota fallback
     ├── clipper.py          renderer: per-frame face-tracking vertical crop
     └── gaming_layout.py    renderer: webcam-over-gameplay vstack
 
@@ -1390,8 +1391,10 @@ tags with copy buttons, a "Rewrite" action (`?force=true`), and copy-everything.
 
 Reads `/api/settings` and `/api/usage` to render:
 
-- Provider switcher (Gemini / OpenAI) — offering a switch rather than asking for
-  a key that's already on disk
+- Provider switcher (Gemini / Groq / OpenAI / a local server) — offering a
+  switch rather than asking for a key that's already on disk. The local option
+  swaps the key field for a server URL and a model list read from the server
+  itself, because that is what it actually needs
 - Model picker, with each Gemini model's **free-tier daily allowance shown next
   to it**. The allowance differs enormously (20/day on one, 1000 on another), and
   picking wrong is the difference between a working afternoon and a paid API. The
@@ -2279,8 +2282,8 @@ rather than guessing from what the button last did.
 | Route | Purpose |
 |---|---|
 | `GET /api/options` | Aspect ratios, layouts and corners for the UI controls |
-| `GET /api/settings` | Whether a key exists, which provider, where it came from, ffmpeg presence, available Gemini models with free-tier limits. **Never returns the key itself** |
-| `POST /api/settings` | Save a key / switch provider / pick a model / set a self-imposed daily cap. Gemini models are probe-tested before storing |
+| `GET /api/settings` | Whether a key exists, which provider, where it came from, ffmpeg presence, available Gemini models with free-tier limits, and the local server's URL and loaded models. **Never returns the key itself** |
+| `POST /api/settings` | Save a key / switch provider / pick a model / set a self-imposed daily cap. Gemini models and local-server models are probe-tested before storing |
 | `GET /api/usage` | Today's spend per provider per model, seconds until reset, whether an OpenAI fallback is ready |
 | `GET`/`POST /api/locations` | Read or change the save location |
 | `GET`/`POST /api/cleanup` | Scan for, then delete, reclaimable source files |

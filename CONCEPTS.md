@@ -1050,12 +1050,23 @@ Ordered by value, with the reasoning that makes each defensible:
    baselines. One final comparison pass over the surviving candidates would make
    the global top-N meaningful rather than approximate.
 
-2. **A local LLM as the last rung.** Groq now covers the common case — a free
+2. **A local LLM as the last rung.** Groq covers the common case — a free
    provider with independent capacity. What it does *not* cover is being
-   offline, or wanting the app to work with no API key at all. Ollama would.
-   Be precise about the tradeoff: on 8 GB of VRAM you can run an 8–14B model,
-   and it is genuinely **worse** than either cloud provider at nuanced judgement
-   over a long transcript. It is the right *last resort*, not the right primary.
+   offline, or wanting the app to work with no API key at all.
+
+   That part now exists: `LLM_PROVIDER=local_llm` points the run at any
+   OpenAI-compatible server on your own machine — LM Studio, Ollama,
+   llama.cpp's `server`. It reuses the same trick Groq does, the `openai`
+   client with a different `base_url`, so it cost no new dependency and no
+   second response parser.
+
+   Be precise about the tradeoff, because it is the reason this is a *choice*
+   rather than a rung on the ladder: on 8 GB of VRAM you can run an 8–14B
+   model, and it is genuinely **worse** than either cloud provider at nuanced
+   judgement over a long transcript. The automatic chain still fails over
+   between cloud providers only; picking the local server is a deliberate act
+   by someone who wants no key or no network, not something the app does to
+   you when Gemini has a bad afternoon.
 
 3. **Evaluation against real retention data.** Everything about the ranking
    rubric is currently assumed. Published Shorts produce retention curves; those

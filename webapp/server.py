@@ -105,6 +105,8 @@ class SettingsRequest(BaseModel):
     # A self-imposed daily request cap, so a provider that bills instead of
     # cutting you off still has a line to draw a meter against. "" clears it.
     daily_limit: Optional[str] = None
+    # Where the local OpenAI-compatible server (LM Studio, etc.) is listening.
+    base_url: Optional[str] = None
 
 
 def _gemini_model_options() -> list:
@@ -140,6 +142,21 @@ GROQ_MODEL_OPTIONS = [
 ]
 
 
+_MODEL_ENV_VARS = {
+    "gemini": "GEMINI_MODEL",
+    "groq": "GROQ_MODEL",
+    "openai": "OPENAI_MODEL",
+    "local_llm": "LOCAL_LLM_MODEL",
+}
+
+
+def _local_llm_model_options() -> list:
+    """Models currently loaded on the local OpenAI-compatible server, if reachable."""
+    from shorts_generator.local.llm import list_local_llm_models
+
+    return list_local_llm_models()
+
+
 @app.get("/api/settings")
 async def get_settings() -> dict:
     """What the UI needs to decide whether to show first-run setup.
@@ -148,10 +165,14 @@ async def get_settings() -> dict:
     it came from, so the user knows which knob actually controls it.
     """
     from shorts_generator import usage, user_config
-    from shorts_generator.config import current_model, current_provider
+    from shorts_generator.config import current_local_llm_base_url, current_model, current_provider
 
     provider = current_provider()
     from_env = bool(os.getenv("GEMINI_API_KEY") or os.getenv("OPENAI_API_KEY"))
+    # Asking the local server what it has loaded is a network call, and this
+    # endpoint is on the first-run path for everyone. Off the event loop, so a
+    # server that is not running cannot hold up the rest of the app.
+    local_llm_models = await asyncio.to_thread(_local_llm_model_options)
     return {
         "has_key": user_config.has_llm_key(),
         "provider": provider,
@@ -165,6 +186,8 @@ async def get_settings() -> dict:
             "gemini": bool(user_config.get("GEMINI_API_KEY")),
             "groq": bool(user_config.get("GROQ_API_KEY")),
             "openai": bool(user_config.get("OPENAI_API_KEY")),
+            # A local server has no key — it's "set up" once a model is chosen.
+            "local_llm": bool(user_config.get("LOCAL_LLM_MODEL")),
         },
         "daily_limits": {
             "gemini": user_config.get("GEMINI_DAILY_LIMIT"),
@@ -180,9 +203,12 @@ async def get_settings() -> dict:
         # so the choice is made with the number in view.
         "gemini_models": _gemini_model_options(),
         "groq_models": GROQ_MODEL_OPTIONS,
-        "model_pinned": bool(os.getenv("GEMINI_MODEL", "").strip())
-        if provider == "gemini" else bool(os.getenv("GROQ_MODEL", "").strip())
-        if provider == "groq" else bool(os.getenv("OPENAI_MODEL", "").strip()),
+        "model_pinned": bool(os.getenv(_MODEL_ENV_VARS[provider], "").strip())
+        if provider in _MODEL_ENV_VARS else False,
+        # The local server is listed the same way: whatever it has loaded now,
+        # since a name typed by hand 404s the moment nothing matches it.
+        "local_llm_base_url": current_local_llm_base_url(),
+        "local_llm_models": local_llm_models,
     }
 
 
@@ -225,37 +251,57 @@ async def set_settings(req: SettingsRequest) -> dict:
     # OpenAI's name, which is the kind of bug that only shows up as a
     # confusing auth failure much later.
     prefixes = {"gemini": "GEMINI", "openai": "OPENAI", "groq": "GROQ"}
-    if provider not in prefixes:
-        raise HTTPException(400, "Provider must be 'gemini', 'groq' or 'openai'.")
-    prefix = prefixes[provider]
-
-    key = (req.api_key or "").strip()
-    key_name = f"{prefix}_API_KEY"
-    # Switching to a provider whose key is already stored must not demand the
-    # key again — retyping a secret you already saved is not a security step,
-    # it is just a reason to keep the wrong provider selected.
-    if not key and not user_config.get(key_name):
-        raise HTTPException(400, "Paste an API key first.")
+    if provider not in prefixes and provider != "local_llm":
+        raise HTTPException(
+            400, "Provider must be 'gemini', 'groq', 'openai' or 'local_llm'."
+        )
 
     values = {} if req.as_fallback else {"LLM_PROVIDER": provider}
-    if key:
-        values[key_name] = key
-    if req.model:
-        model = req.model.strip()
-        if provider == "gemini":
-            # Prove it works before storing it, so a dead model is caught here
-            # rather than partway through a render that already cost a
-            # download and a transcription.
-            from shorts_generator.local.llm import check_gemini_model
-            problem = await asyncio.to_thread(check_gemini_model, model)
+
+    if provider == "local_llm":
+        # No API key to check — a local server takes any placeholder. What it
+        # actually needs is a reachable URL and a model that is loaded there.
+        if req.base_url is not None:
+            base_url = req.base_url.strip()
+            if not base_url:
+                raise HTTPException(400, "Enter the local server's URL first.")
+            values["LOCAL_LLM_BASE_URL"] = base_url
+        if req.model:
+            model = req.model.strip()
+            from shorts_generator.local.llm import check_local_llm
+            problem = await asyncio.to_thread(check_local_llm, model)
             if problem:
                 raise HTTPException(400, problem)
-        values[f"{prefix}_MODEL"] = model
-    if req.daily_limit is not None:
-        cap = req.daily_limit.strip()
-        if cap and not cap.isdigit():
-            raise HTTPException(400, "The daily cap must be a whole number of requests.")
-        values[f"{prefix}_DAILY_LIMIT"] = cap
+            values["LOCAL_LLM_MODEL"] = model
+        elif not user_config.get("LOCAL_LLM_MODEL"):
+            raise HTTPException(400, "Pick a model first.")
+    else:
+        prefix = prefixes[provider]
+        key = (req.api_key or "").strip()
+        key_name = f"{prefix}_API_KEY"
+        # Switching to a provider whose key is already stored must not demand
+        # the key again — retyping a secret you already saved is not a security
+        # step, it is just a reason to keep the wrong provider selected.
+        if not key and not user_config.get(key_name):
+            raise HTTPException(400, "Paste an API key first.")
+        if key:
+            values[key_name] = key
+        if req.model:
+            model = req.model.strip()
+            if provider == "gemini":
+                # Prove it works before storing it, so a dead model is caught
+                # here rather than partway through a render that already cost a
+                # download and a transcription.
+                from shorts_generator.local.llm import check_gemini_model
+                problem = await asyncio.to_thread(check_gemini_model, model)
+                if problem:
+                    raise HTTPException(400, problem)
+            values[f"{prefix}_MODEL"] = model
+        if req.daily_limit is not None:
+            cap = req.daily_limit.strip()
+            if cap and not cap.isdigit():
+                raise HTTPException(400, "The daily cap must be a whole number of requests.")
+            values[f"{prefix}_DAILY_LIMIT"] = cap
 
     path = user_config.save(values)
     return {"saved": True, "config_path": str(path),

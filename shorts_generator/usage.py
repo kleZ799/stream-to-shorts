@@ -138,6 +138,11 @@ def _model_entry(data: Dict, provider: str, model: str) -> Dict:
 
 def daily_limit(provider: str, model: str) -> int:
     """Requests per day for this model, or DAILY_LIMIT_UNKNOWN if uncapped."""
+    if provider == "local_llm":
+        # A server on your own machine has no allowance to run out of, and it
+        # must not inherit OpenAI's cap -- a number set to meter a bill would
+        # otherwise stop a local run that costs nothing.
+        return DAILY_LIMIT_UNKNOWN
     override = user_config.get(
         "GEMINI_DAILY_LIMIT" if provider == "gemini" else "OPENAI_DAILY_LIMIT"
     )
