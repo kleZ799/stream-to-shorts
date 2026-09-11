@@ -142,7 +142,9 @@ jobs:
           foreach ($attempt in 1..5) {
             try {
               Write-Host "downloading $url (attempt $attempt of 5)"
-              Invoke-WebRequest -Uri $url -OutFile ffmpeg.zip -UseBasicParsing
+              # Bounded, so a transfer that stalls fails this attempt instead
+              # of waiting out the job's whole time limit.
+              Invoke-WebRequest -Uri $url -OutFile ffmpeg.zip -UseBasicParsing -TimeoutSec 600
               Expand-Archive ffmpeg.zip -DestinationPath ffmpeg-tmp -Force
               if (-not (Get-ChildItem ffmpeg-tmp -Recurse -Filter ffmpeg.exe)) {
                 throw "the archive has no ffmpeg.exe in it"
@@ -321,7 +323,10 @@ jobs:
             name="$1"; url="$2"
             for attempt in 1 2 3 4 5; do
               echo "downloading $url (attempt $attempt of 5)"
-              if curl -fsSL --retry 3 --retry-delay 5 -o "$name.zip" "$url" \
+              # Bounded too: a stalled transfer is a failed attempt, not a
+              # step that waits out the job's whole time limit.
+              if curl -fsSL --retry 3 --retry-delay 5 --connect-timeout 30 --max-time 600 \
+                      --speed-limit 100000 --speed-time 60 -o "$name.zip" "$url" \
                  && unzip -tq "$name.zip" > /dev/null; then
                 break
               fi
@@ -602,7 +607,13 @@ jobs:
           ok=""
           for attempt in 1 2 3 4 5; do
             echo "downloading $url (attempt $attempt of 5)"
-            if curl -fsSL --retry 3 --retry-delay 10 -o ffmpeg.tar.xz "$url" \
+            # And bounded. v1.11.1's first build sat in this step for over
+            # forty minutes on a transfer that stalled rather than failed: with
+            # no limit curl waits forever, and the loop never gets its turn. A
+            # stall -- under 100 KB/s for a minute -- or ten minutes in total
+            # is now a failed attempt like any other.
+            if curl -fsSL --retry 3 --retry-delay 10 --connect-timeout 30 --max-time 600 \
+                    --speed-limit 100000 --speed-time 60 -o ffmpeg.tar.xz "$url" \
                && xz -t ffmpeg.tar.xz; then
               ok=1
               break
