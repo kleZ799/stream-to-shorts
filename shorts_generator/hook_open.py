@@ -26,7 +26,7 @@ from __future__ import annotations
 import os
 from typing import Dict, Optional
 
-from . import proc
+from . import accel, proc
 
 # How long the cold open runs. Long enough to register as a moment, short
 # enough that the viewer is inside the real clip before they could get bored
@@ -124,15 +124,13 @@ def apply(clip_path: str, highlight: Dict) -> Optional[float]:
         )
         maps = ["-map", "[v]"]
 
-    cmd = [
-        "ffmpeg", "-y", "-loglevel", "error", "-i", clip_path,
-        "-filter_complex", filt, *maps,
-        "-c:v", "libx264", "-preset", "medium", "-crf", "23", "-pix_fmt", "yuv420p",
-        "-movflags", "+faststart",
-        tmp,
-    ]
+    def build(enc):
+        return ["ffmpeg", "-y", "-loglevel", "error", "-i", clip_path,
+                "-filter_complex", filt, *maps, *enc,
+                "-movflags", "+faststart", tmp]
+
     try:
-        proc.run_checked(cmd, what="ffmpeg (cold open)")
+        accel.run_encode(build, what="ffmpeg (cold open)", crf=23)
         os.replace(tmp, clip_path)
     except Exception as e:
         print(f"[hook] could not add the cold open ({e}) — keeping the plain cut",

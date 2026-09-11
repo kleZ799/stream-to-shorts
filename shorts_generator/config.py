@@ -103,6 +103,16 @@ def current_provider() -> str:
     return (user_config.get("LLM_PROVIDER", LLM_PROVIDER) or "gemini").strip().lower()
 
 
+def current_processor() -> str:
+    """auto / gpu / cpu -- what does the heavy work. See accel.py.
+
+    Re-read at call time like the provider, so a change made in Settings --
+    even while a run is paused -- applies from the next clip.
+    """
+    from . import user_config
+    return (user_config.get("PROCESSOR", "auto") or "auto").strip().lower()
+
+
 def current_model(provider: str) -> str:
     from . import user_config
     if provider == "openai":

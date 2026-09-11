@@ -204,6 +204,7 @@ function openDrawer() {
   body.classList.add("drawer-on");
   loadLocations();
   loadCleanup();
+  loadProcessor();
 }
 $("settingsBtn").onclick = openDrawer;
 $("gSettings").onclick = openDrawer;
@@ -246,6 +247,48 @@ async function checkSetup() {
     }
   } catch (_) { /* an offline settings check is not worth blocking startup */ }
 }
+
+// ---------------------------------------------------------------- processor
+
+// What does the heavy work, and why. Asked fresh every time the drawer opens:
+// the answer is found by trying things (a one-second test encode), and a run
+// can change it -- an encoder that fails mid-run is dropped for that run.
+async function loadProcessor(recheck = false) {
+  const info = $("procInfo");
+  try {
+    const d = await api(`/api/processor${recheck ? "?recheck=true" : ""}`);
+    $("procMode").value = d.mode || "auto";
+    $("procMode").disabled = !!d.pinned;
+    const video = d.video_label
+      || (d.checked ? "CPU (x264)" : "checked once the run is resumed");
+    const talk = d.transcribe_device === "cuda" ? "NVIDIA GPU (CUDA)" : "CPU";
+    info.innerHTML = `
+      <div><span>Video encoding</span><b>${esc(video)}</b></div>
+      <div><span>Transcription</span><b>${esc(talk)}</b></div>`;
+    $("procHint").textContent = d.pinned
+      ? "Set by the PROCESSOR environment variable, which outranks this setting."
+      : d.transcribe_device === "cuda" ? "" : `Transcription uses the CPU: ${d.transcribe_reason}.`;
+  } catch (e) {
+    info.innerHTML = `<div class="err">${esc(e.message)}</div>`;
+  }
+}
+
+$("procMode").onchange = async () => {
+  $("procMsg").innerHTML = "";
+  try {
+    await api("/api/processor", json("POST", { mode: $("procMode").value }));
+    await loadProcessor();
+    toast("Saved — applies from the next clip.");
+  } catch (e) {
+    $("procMsg").innerHTML = `<div class="err">${esc(e.message)}</div>`;
+  }
+};
+
+$("procCheck").onclick = async () => {
+  $("procCheck").disabled = true;
+  await loadProcessor(true);
+  $("procCheck").disabled = false;
+};
 
 // Which Gemini model you are on decides how many free runs a day you get —
 // 20 on one, hundreds on another. That number belongs next to the choice,

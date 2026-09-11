@@ -9,7 +9,7 @@ import os
 import subprocess
 from typing import Dict, List, Optional
 
-from . import proc
+from . import accel, proc
 from .layout_spec import LayoutSpec
 
 # Loudness target for every export. -14 LUFS is what YouTube, TikTok and
@@ -45,7 +45,7 @@ def _render_center_clip(source_path: str, start: float, end: float, out_path: st
         f"[0:v]crop={crop_w}:{crop_h}:{x}:{y},"
         f"scale={out_w}:{out_h}:flags=lanczos,setsar=1[v]"
     )
-    proc.run_checked([
+    accel.run_encode(lambda enc: [
         "ffmpeg", "-y", "-loglevel", "error",
         "-ss", f"{start:.3f}", "-i", source_path, "-t", f"{end - start:.3f}",
         "-filter_complex", filt,
@@ -55,11 +55,11 @@ def _render_center_clip(source_path: str, start: float, end: float, out_path: st
         # lower production value before a word of it is heard, so the output
         # is normalised to the same target the platforms mix to.
         "-af", LOUDNESS_FILTER,
-        "-c:v", "libx264", "-preset", "medium", "-crf", "23", "-pix_fmt", "yuv420p",
+        *enc,
         "-c:a", "aac", "-b:a", "160k",
         "-movflags", "+faststart",
         out_path,
-    ], what="ffmpeg (centre crop render)")
+    ], what="ffmpeg (centre crop render)", crf=23)
     return {"crop": {"x": x, "y": y, "w": crop_w, "h": crop_h}}
 
 

@@ -10,7 +10,7 @@ from typing import Dict, List, Optional
 
 import sys
 
-from .. import user_config
+from .. import proc, user_config
 from ..config import LOCAL_OUTPUT_DIR, LOCAL_WHISPER_DEVICE, LOCAL_WHISPER_MODEL
 
 
@@ -184,30 +184,19 @@ def _load_srt_cache(cache_path: Path) -> Dict:
 
 
 def _resolve_device() -> str:
-    # Before anything asks whether CUDA works, make sure it *can* work.
-    _register_cuda_dlls()
-    if LOCAL_WHISPER_DEVICE != "auto":
-        return LOCAL_WHISPER_DEVICE
-    try:
-        import torch  # type: ignore
-        if torch.cuda.is_available():
-            # Test that CUDA actually works (catches missing cuBLAS/cuDNN libs)
-            torch.zeros(1, device="cuda")
-            return "cuda"
-    except (ImportError, OSError, RuntimeError):
-        pass
+    """Where transcription runs, under the Processor setting -- see accel.py.
 
-    # torch is not what runs the model -- faster-whisper sits on CTranslate2,
-    # and this install has no torch at all. Asking the wrong library was
-    # sending a machine with a working GPU down the CPU path and spending
-    # half an hour on a transcript. Ask the engine that does the work.
-    try:
-        import ctranslate2  # type: ignore
-        if ctranslate2.get_cuda_device_count() > 0:
-            return "cuda"
-    except (ImportError, OSError, RuntimeError):
-        pass
-    return "cpu"
+    The old check asked CTranslate2 whether it could *count* a GPU, which it
+    can on any NVIDIA machine, and then the run died looking for cuBLAS on
+    every copy of the app that ships without it. accel also checks that the
+    libraries load, so a missing one is a sentence here instead of a crash
+    halfway through the first minute of audio.
+    """
+    from .. import accel
+    device, why = accel.whisper_device(_register_cuda_dlls)
+    print(f"[transcribe/local] transcribing on the {'GPU' if device == 'cuda' else 'CPU'}"
+          f" - {why}", flush=True)
+    return device
 
 
 def transcribe_local(media_path: str, language: Optional[str] = None) -> Dict:
@@ -272,6 +261,11 @@ def transcribe_local(media_path: str, language: Optional[str] = None) -> Dict:
         segments_iter, info = model.transcribe(**transcribe_kwargs)
         out = []
         for s in segments_iter:
+            # Transcription runs inside this process, so Pause cannot suspend
+            # it the way it suspends ffmpeg. The generator is lazy, though:
+            # holding here stops the model decoding the next window, on the
+            # CPU or the GPU alike, until the run is resumed.
+            proc.wait_if_paused()
             out.append({
                 "start": float(s.start),
                 "end": float(s.end),
@@ -286,8 +280,11 @@ def transcribe_local(media_path: str, language: Optional[str] = None) -> Dict:
         # CPU rather than not at all.
         if device != "cuda":
             raise
-        print(f"[transcribe/local] cuda failed ({str(e).splitlines()[0][:120]}); "
-              f"redoing on cpu", flush=True)
+        from .. import accel
+        accel.mark_cuda_failed()
+        print(f"[transcribe/local] the GPU stopped partway "
+              f"({str(e).splitlines()[0][:120]}) - finishing on the CPU. If this "
+              f"keeps happening, set Processor to CPU in Settings", flush=True)
         device, compute_type = "cpu", "int8"
         segments, info = _run(device, compute_type)
 

@@ -412,6 +412,23 @@
   </div>
 
   <div class="d-sec">
+    <h3>Processor</h3>
+    <label class="fld">
+      <span>What does the heavy work</span>
+      <select id="procMode">
+        <option value="auto">Automatic — the fastest this computer has</option>
+        <option value="gpu">GPU — graphics card</option>
+        <option value="cpu">CPU only</option>
+      </select>
+    </label>
+    <div class="kv" id="procInfo"></div>
+    <p class="hint" id="procHint"></p>
+    <p class="hint">Takes effect from the next clip — even on a paused run. Choose CPU if a graphics driver keeps failing.</p>
+    <button class="btn ghost sm" id="procCheck">Check again</button>
+    <div id="procMsg"></div>
+  </div>
+
+  <div class="d-sec">
     <h3>Language</h3>
     <label class="fld">
       <span>Interface language</span>

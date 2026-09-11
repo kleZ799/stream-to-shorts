@@ -713,6 +713,8 @@ class JobStore:
 
     def _execute_clips(self, job: Job) -> None:
         """Render a finished run's failed clips again, and put them in place."""
+        from shorts_generator import accel
+        accel.reset_run()
         with self._lock:
             job.status = "running"
             job._version += 1
@@ -775,6 +777,10 @@ class JobStore:
         # A previous run may have fallen back to OpenAI. Start this one on the
         # provider the user actually chose — its quota may well have reset.
         reset_fallback()
+        # Likewise a hardware encoder, or the GPU for transcription, that gave
+        # up last run: a driver hiccup is worth one more chance per run.
+        from shorts_generator import accel
+        accel.reset_run()
 
         with self._lock:
             job.status = "running"

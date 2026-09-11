@@ -262,6 +262,37 @@ async def set_settings(req: SettingsRequest) -> dict:
             "has_key": user_config.has_llm_key()}
 
 
+class ProcessorRequest(BaseModel):
+    mode: str = "auto"
+
+
+@app.get("/api/processor")
+async def get_processor(recheck: bool = False) -> dict:
+    """What transcription and video encoding will run on, and why.
+
+    Finding the video encoder runs a one-second test encode, so it is done in
+    a thread and remembered; `recheck` forgets the answer and looks again,
+    for someone who has just installed a driver.
+    """
+    from shorts_generator import accel
+    if recheck:
+        await asyncio.to_thread(accel.probe_video, True)
+    state = await asyncio.to_thread(accel.status)
+    state["pinned"] = bool(os.getenv("PROCESSOR", "").strip())
+    return state
+
+
+@app.post("/api/processor")
+async def set_processor(req: ProcessorRequest) -> dict:
+    """Choose auto, gpu or cpu. Applies from the next clip, even mid-run."""
+    from shorts_generator import accel, user_config
+    mode = (req.mode or "").strip().lower()
+    if mode not in accel.MODES:
+        raise HTTPException(400, "Processor must be auto, gpu or cpu.")
+    user_config.save({"PROCESSOR": mode})
+    return await get_processor()
+
+
 class LocationRequest(BaseModel):
     path: str
 
