@@ -204,7 +204,8 @@ shorts_generator/
 ├── hook_open.py            prepend a late payoff to the front of a clip
 ├── layout_spec.py          natural language → LayoutSpec; quality ladder
 ├── render.py               one entry point that dispatches a LayoutSpec
-├── seo.py                  subject detection, titles, tags, hashtags
+├── vision.py               what each clip shows, from four of its frames
+├── seo.py                  per-clip subject, ranked titles, tags, hashtags
 │
 ├── downloader.py           api mode: MuAPI /youtube-download
 ├── transcriber.py          api mode: MuAPI /openai-whisper
@@ -214,9 +215,9 @@ shorts_generator/
 └── local/
     ├── downloader.py       yt-dlp, download cache, channel listing, metadata
     ├── transcriber.py      faster-whisper + .srt cache
-    ├── llm.py              Gemini / OpenAI dispatch, retries, quota fallback
-    ├── clipper.py          renderer: per-frame face-tracking vertical crop
-    └── gaming_layout.py    renderer: webcam-over-gameplay vstack
+    ├── llm.py              Gemini / Groq / OpenAI, text + vision, retries, fallback
+    ├── clipper.py          renderer: face-following crop on a planned camera path
+    └── gaming_layout.py    renderer: webcam-over-gameplay vstack, overlay located
 
 webapp/
 ├── __main__.py             python -m webapp
@@ -271,8 +272,9 @@ get_highlights(audio=…, reserve=…)    ← stage: rank       (bar 0.55 → 0.
 sort by score, take top N
       │
       ▼
-detect_subject()                      ← what the video is about, named once
-attach_seo()                          ← titles, descriptions, tags
+detect_subject()                      ← what the video is about, and all it mentions
+_look_at_clips() → describe_clips()   ← what each clip's frames show (vision.py)
+attach_seo()                          ← ranked titles, descriptions, tags
       │
       ▼
 render_highlights(spec)               ← stage: render     (bar 0.70 → 1.00)
@@ -687,21 +689,44 @@ Net effect: a 1440p stream renders at 1440×2560 instead of being flattened to t
 ```
 
 The webcam is **not a hardcoded rectangle.** Each clip gets its overlay located
-from scratch:
+from scratch. The first version of this took the median face in the corner and
+cropped five face-widths around it, and real streams broke it twice: it locked
+onto a baby's photo *inside the game*, and wherever the overlay was smaller than
+the guess it filled the cam panel with gameplay and letterbox bars. Both are
+fixed by the one property that tells an overlay from a game — **it does not
+move** — which means looking at more than the clip:
 
-1. **Sample 6 frames** (`SAMPLE_COUNT`) spread evenly across the clip's span.
-2. For each, extract one frame via ffmpeg and run a **Haar frontal-face cascade —
-   only inside the quadrant the overlay lives in** (`corner`, default
-   `bottom-left`). This is the fix for problem #1 in [§2](#2-the-problem-this-actually-solves):
-   a character's face elsewhere in the frame physically cannot win.
-3. Take the **median** of the hits for centre-x, centre-y and face width. Median,
-   not mean — one bad detection (a frame where the streamer looked away) can't
-   drag the framing off.
-4. Build the crop at `face_w × FACE_CONTEXT_MULTIPLE (5.0) × (1 - CAM_EDGE_INSET)`,
-   4:3 shaped, face anchored at `FACE_VERTICAL_ANCHOR` (0.42) down the panel. The
-   edge inset trims the overlay's own border so it doesn't show as a black sliver.
-5. Clamp the rect inside the frame **without changing its size**, and round every
-   coordinate to even numbers — h264 chroma subsampling requires it.
+1. **Sample ~20 frames**: `SAMPLE_COUNT` (6) inside the clip and
+   `CONTEXT_SAMPLES` (14) from `CONTEXT_SECONDS` (240) either side of it, each
+   scaled to `ANALYSIS_WIDTH` (960). Over eight minutes the game underneath
+   changes completely; the overlay does not.
+2. **The streamer is the face that recurs.** Haar runs on every sample; each
+   detection counts how many others sit within a face-width of it, and the
+   best-supported one plus its neighbours is the streamer (`_recurring_face`).
+   A face in the game appears in one or two samples and loses the vote. Only
+   detections near the configured `corner` take part.
+3. **The overlay's border is found, not guessed** (`_overlay_bounds`). Two maps
+   over the samples: the 20th-percentile Sobel gradient (an edge present in
+   ~80% of samples) and the per-pixel standard deviation (how much the picture
+   changes; always-black letterbox counts as "outside"). Walking out from the
+   face in each direction, the border is the persistent edge with the most
+   change beyond it and the least before it. A door frame behind the streamer is
+   persistent too — but it is still on both sides, so it scores nothing.
+4. **The crop fits inside the border**, at the panel's own aspect
+   (`out_w / cam_h` — the old 4:3 stretched any panel but the default), as much
+   of `face_w × FACE_CONTEXT_MULTIPLE` as fits, face at `FACE_VERTICAL_ANCHOR`,
+   pulled in `BORDER_INSET` pixels so the border never shows.
+5. Coordinates are scaled back to the source and rounded to even numbers — h264
+   chroma subsampling requires it.
+
+On the Edith Finch VOD the repo is tested against, three spans that used to
+give three different rects (one of them the baby) now give the same one, from
+8–16 agreeing detections, in about 5s per clip.
+
+**A face that fills the frame** (`FULL_FRAME_FACE`, 10% of the width, recurring)
+means there is no overlay: the camera *is* the video. That clip is handed to
+the face-following renderer below rather than split in two — so a podcast or a
+just-chatting segment run with the default layout still comes out right.
 
 Then the whole thing renders in **one ffmpeg pass**:
 
@@ -718,28 +743,44 @@ If no face turns up in any sample, it falls back to a full-height centre crop an
 
 ### 7.3 `facetrack` — the talking-head crop
 
-`local/clipper.py`. The upstream approach, kept for podcast footage where the
-speaker fills the frame.
+`local/clipper.py`. For footage where the speaker fills the frame — and what the
+stacked renderer hands a clip to when it finds that the camera is the whole
+picture.
 
-Two stages per clip: ffmpeg cuts the span (`-preset ultrafast -crf 18` — it's an
-intermediate that gets re-encoded anyway, so favour speed at near-transparent
-quality), then OpenCV walks **every frame**, detects the largest face, and slides
-a crop window toward it with `smoothing = 0.15` so the framing eases rather than
-snaps. Finally ffmpeg muxes the original audio back onto the silent OpenCV output
-and re-encodes to h264 (OpenCV writes mpeg4, which uploads don't universally
-accept).
+The upstream version detected the largest face on every frame and eased 15% of
+the way toward it. It stuttered: Haar boxes wobble by several pixels between
+identical frames, a false positive yanks the window for a frame or two, and a
+crop that is always moving a little reads as a shaky camera. So the path is now
+**planned before anything renders**, the way a camera operator would shoot it:
 
-Three fixes in here, each of which produced an opaque failure:
+1. **Detect** (`track_faces`) ~8 times a second (`DETECT_PER_SECOND`) on a 640px
+   copy, frontal cascade first and the profile cascade in both directions when
+   that misses. The track stays on the person already followed; a face somewhere
+   else must hold for `CONFIRM_SAMPLES` before the window goes to it.
+2. **Clean**: gaps are held at the last position, spikes removed with a ~0.6s
+   median.
+3. **Operate** (`_operate`): the window does not move while the face stays inside
+   a `DEAD_ZONE` of 12% of the window; when it leaves, the window re-centres on it.
+   A jump larger than `CUT_JUMP` between samples is a cut in the source.
+4. **Ease**: a zero-lag Gaussian (`EASE_SECONDS` 0.45) over each stretch between
+   cuts, so every move eases in and out and a cut stays a cut.
+5. **Render** in one ffmpeg pass: `sendcmd` feeds the planned `crop` x/y frame by
+   frame, each command half a frame early so a timestamp that rounds up still
+   lands on its own frame. No mp4v intermediate, no audio re-mux.
 
-- **Downscaled detection.** Haar runs on a copy scaled to 640px wide, then
-  coordinates scale back up. At 1440p, full-resolution detection cost more than
-  the entire rest of the pipeline combined.
-- **`.copy()` on the crop.** OpenCV's writer throws an unreadable C++ exception on
-  a non-contiguous NumPy view at high resolution.
-- **`finally: cap.release(); writer.release()`** plus retry-with-backoff temp
-  deletion. Windows holds the file lock until both handles close — otherwise a
-  real encoding error surfaces as a confusing `WinError 32` from the cleanup path,
-  masking the actual problem.
+On a real face cam: direction reversals went from 50 to 4, the share of frames
+with any movement from 39% to 21%, and the face stays within 4% of centre
+(median).
+
+Fixes that carried over, each of which once produced an opaque failure:
+
+- **Downscaled detection.** At 1440p, full-resolution Haar cost more than the
+  entire rest of the pipeline combined.
+- **The `sendcmd` file path** is escaped as ffmpeg's filter syntax wants
+  (`C\:/…`) — an unescaped drive colon ends the option on Windows.
+- **Retry-with-backoff temp deletion.** Windows holds a file lock until every
+  handle closes, and a real encoding error otherwise surfaces as a confusing
+  `WinError 32` from the cleanup path.
 
 This mode is **~20× slower** than the other two, and `LayoutSpec.warning()` says
 so in the UI before the user commits to a long render.
@@ -870,10 +911,77 @@ months later files the clips under the same name as the original run. An empty
 subject is a valid answer — it means the titles are written from the clips
 alone, exactly as before.
 
+It also returns `all_subjects`: every game, show or topic the listing and the
+transcript mention. The transcript sample is spread across the whole video
+(`_spread_sample`), not its first minutes — a variety stream spends those on
+its first game. That list is the candidate set for the next step.
+
+### What is on screen — `vision.py`
+
+One subject per run was the bug. A stream titled *"The Finals chill stream"*
+that moved on to Firewatch and a horror game came back with Firewatch clips
+tagged `#thefinals`, and the horror clip named after a game it was not.
+Nothing ever looked at the screen, and nobody says "I am now playing Firewatch"
+out loud.
+
+So before any title is written, `_look_at_clips()` in the job runner sends four
+frames per clip (768px on the long side) to a vision-capable model through
+`call_vision_llm()` — Gemini, then OpenAI, then Groq's vision model, up to 20
+frames per request (5 on Groq). Each clip gets a `scene`: its `content_type`
+(gameplay, podcast, talking head, storytelling, tutorial…), `layout`,
+`subject`, `named_by`, `subject_guess`, `genre`, `on_screen_text`, `scene`,
+`people`, `mood`. It is saved on the clip in `job.json`, so a rewrite never pays
+for it twice; clips made before this are looked at once, from the source if it
+is still on disk and from the rendered clip if not.
+
+**The evidence rule** is the part that matters. Tested on the real clips, the
+model called a Fears to Fathom clip *Phasmophobia* at confidence 1.0 — dark
+houses look alike, and its confidence number meant nothing. So a name counts
+only when `named_by` is `on_screen_text` (including characters or places unique
+to one title — "Henry:" and "Delilah:" subtitles are Firewatch), `speech`,
+`source_listing` or `unmistakable` (Minecraft-level fame). Anything else is
+demoted to `subject_guess` in `coerce_scene()`, however sure the model sounded.
+
+`seo.clip_subject()` then decides what each clip is filed under, in order: a
+name the user typed (`subject_override`); a name the frames confirm; a guess
+that matches one of `all_subjects`; the run's subject, as long as the frames do
+not point elsewhere. Anything less certain leaves the clip unnamed and filed by
+its genre — the prompt is told the guess and told not to print it, and
+`_tag_options()` strips it from the tags as well. The run's controlled hashtags
+only apply to clips about the run's subject (`_controlled_hashtags`), and the
+format tags follow the clip's `content_type` (`FORMAT_TAGS`) — a podcast clip is
+no longer tagged "gaming clips".
+
+On that stream, rewriting after the change: three clips confirmed Firewatch from
+their subtitles, one The Finals from its HUD, and the horror clip filed as
+"horror game" with its guess shown in the panel for a person to confirm.
+
+### Several titles, ranked
+
+The writer returns `TITLE_OPTIONS` (5) titles per clip, each on a named angle —
+*search*, *curiosity*, *reaction*, *detail*, *stakes/contradiction* — and scores
+each on an editor's rubric: **hook** 0–40, **clarity** 0–20, **search** 0–20,
+**truth** 0–20. `_rank_options()` then:
+
+- drops any option with truth under 14 — the model's own admission it overclaims;
+- blends the rubric with `score_title()`, the app's own 0–100 check of what a
+  model is bad at: length (35–70 characters), whether a confirmed subject is
+  named and named within the first 40 characters, shouting, filler phrases,
+  hashtags, emoji, and whether it prints an unconfirmed guess;
+- orders them `0.7 × rubric + 0.3 × check`.
+
+The best becomes `title`; all of them are kept as `title_options` for the Boost
+panel. `_spread_leads()` then makes sure no two clips in one batch open with the
+same three words, taking a clip's next-best option where they would. Tags come
+back ranked and labelled by kind (subject, variant, query, genre, moment,
+format); the top ones fitting YouTube's budget go in the box and all of them are
+kept as `tag_options`. Each clip also gets a `search_phrase` — the one phrase it
+should rank for — and an `about` block saying what it was filed under and why.
+
 ### The two rules that outrank everything
 
-1. **Accurate.** Every claim must be provable from that clip's own transcript,
-   which is given to the model. A title the clip fails to deliver gets swiped in
+1. **Accurate.** Every claim must be provable from that clip's own transcript
+   and its `scene`, both of which are given to the model. A title the clip fails to deliver gets swiped in
    two seconds, and short-form ranking punishes that harder than a boring title
    ever could.
 2. **Viral.** Within what is true, pick the most arresting framing. A real
@@ -896,8 +1004,8 @@ alone, exactly as before.
 
 Limits are enforced in code, each set slightly *under* YouTube's real cap so a
 stray character can't get the upload rejected: `TITLE_LIMIT` 100,
-`DESCRIPTION_LIMIT` 4800, `MAX_TAGS` 12, `MAX_HASHTAGS` 5, `TAGS_TOTAL_LIMIT` 460
-(real cap 500).
+`DESCRIPTION_LIMIT` 4800, `MAX_TAGS` 15 in the box (up to `MAX_TAG_OPTIONS` 24
+offered), `MAX_HASHTAGS` 5, `TAGS_TOTAL_LIMIT` 460 (real cap 500).
 
 ### Best-effort, but honestly reported
 
@@ -945,6 +1053,13 @@ not the house **style**: the no-hashtags-in-titles rule exists to stop a model
 padding, and someone who types one into their own title meant it. The entry is
 marked `edited`, which is what makes Rewrite ask before replacing hand-written
 words.
+
+The same route takes a `subject`: what the clip is actually about, when the app
+got it wrong or could only guess. It is saved on the clip as `subject_override`
+rather than in the text, and outranks everything in `clip_subject()` on every
+rewrite after. The panel's Rewrite saves a typed subject first, then calls
+`POST /api/jobs/{id}/seo?only={file}` — one clip, with the rest of the run's
+titles passed as `avoid_titles` so the new one does not open the same way.
 
 ### Finding the words for old clips
 
@@ -2176,11 +2291,20 @@ job's log. Harmless today; the first thing to fix before adding a second worker.
 ### Face detection is Haar, and OpenCV 5 removed it
 
 Both renderers depend on `cv2.CascadeClassifier`, which 5.x dropped — hence the
-`opencv-python>=4.8.0,<5` pin. Haar also means detection is **frontal-face
-only**: a streamer in profile, in heavy shadow, or wearing a large headset can
-defeat it. That is precisely why the stacked renderer samples six frames and
-takes a median rather than trusting any single detection, and why it falls back
-to a centre crop out loud instead of silently shipping a bad framing.
+`opencv-python>=4.8.0,<5` pin. Haar is also weak on profiles, heavy shadow and
+large headsets. The face-following renderer adds the profile cascade in both
+directions for that; the stacked one never trusts a single detection — the
+streamer is whichever face ~20 samples agree on — and falls back to a centre
+crop out loud instead of silently shipping a bad framing.
+
+### The frames can name the wrong game
+
+The vision pass is only as good as the evidence on screen. An indie game with
+no HUD, no subtitles and nothing said about it cannot be named with confidence,
+and the app does not pretend to: it files the clip by genre and shows the
+guess in the Boost panel for a person to confirm. That is a deliberate
+trade — an unnamed clip is findable by its genre; a misnamed one is called out
+in its own comments.
 
 ### Clip filenames are titles, so they change
 
@@ -2314,8 +2438,8 @@ rather than guessing from what the button last did.
 | `POST …/clips/{file}/trim` | Re-cut from source at new timestamps, optionally muted |
 | `POST …/clips/{file}/save` | Copy out of the working folder into the save location |
 | `DELETE …/clips/{file}` | Delete the clip and its file |
-| `POST /api/jobs/{id}/seo` | Write or rewrite upload metadata (`?force=true` to overwrite) |
-| `PUT …/clips/{file}/seo` | Save metadata the user typed; renames the mp4 to a new title |
+| `POST /api/jobs/{id}/seo` | Write or rewrite upload metadata (`?force=true` to overwrite, `?only={file}` for one clip) |
+| `PUT …/clips/{file}/seo` | Save metadata the user typed, or a corrected `subject`; renames the mp4 to a new title |
 | `POST /api/jobs/{id}/reveal` | Show a clip in the file manager |
 
 ---

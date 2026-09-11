@@ -232,6 +232,23 @@ tolerant parser (`_parse_json_loose`) that survives markdown fences, plus a
 retry that re-asks more forcefully on a parse failure. **Defence in depth**: the
 model is asked nicely, constrained by the API, and then not trusted anyway.
 
+### Asking for several answers, then ranking them
+
+A model asked for one title returns its first idea. Asked for five on named
+angles (search, curiosity, reaction, detail, stakes), it explores the space,
+and the best of five beats a single draw — the same reason sampling several
+candidates and picking one (best-of-n) works in general.
+
+Ranking them uses two scorers with different blind spots. The model scores
+each option on a **rubric** — hook, clarity, searchability, truth — because
+judging whether a sentence would stop a stranger scrolling is language work.
+The code scores it too (`score_title`), on what language models are
+notoriously bad at: counting characters, noticing a required word is missing,
+spotting a name that must not be there. The final rank blends them, 70/30, and
+an option the model itself rated as not fully true is dropped rather than
+down-weighted. A rubric turns "which is best" into several smaller judgements,
+each easier to get right and to audit afterwards.
+
 ### Temperature
 
 `0.2`. Low but nonzero. This is a judgement task where you want consistency, not
@@ -254,7 +271,7 @@ output will propagate the degradation.
 
 ## 5. AI/ML: computer vision
 
-**Files:** `shorts_generator/local/gaming_layout.py`, `clipper.py`
+**Files:** `shorts_generator/local/gaming_layout.py`, `clipper.py`, `shorts_generator/vision.py`
 
 **Haar cascade classifiers** (`cv2.CascadeClassifier` with
 `haarcascade_frontalface_default.xml`). This is *classical* CV, not deep
@@ -276,8 +293,70 @@ accurate at real cost in size and dependencies. A deliberate accuracy/deployment
 tradeoff, not an oversight.
 
 **Sampling:** the face is located from several frames, not one, and the results
-are aggregated (`from 5/6 samples` in the logs). One frame can catch a blink, a
+are aggregated (`from 14/20 samples` in the logs). One frame can catch a blink, a
 turn, or a transition; sampling is cheap variance reduction.
+
+### Consensus instead of "the biggest one"
+
+A face detector answers "where are the faces", not "which one is the
+streamer". Taking the largest face in the webcam's corner locked onto a baby's
+photo inside a game. The fix is a vote: across ~20 frames spread over eight
+minutes, each detection counts how many others sit within one face-width of
+it, and the best-supported cluster wins (`_recurring_face`). This is the same
+idea as RANSAC or a mode estimate — the true answer is the one most
+observations agree on, and an outlier that shows up once cannot outvote it
+however large it is.
+
+### Temporal statistics: telling an overlay from a game
+
+In any single frame, the webcam overlay's border is just an edge among
+thousands. Across many frames it is special in two ways, and the locator uses
+both:
+
+- **Persistence.** The 20th percentile of the gradient magnitude at each pixel,
+  across all samples, is high only where an edge exists in ~80% of them. A
+  percentile rather than the mean, because the mean is dragged up by one frame
+  with a strong edge in it.
+- **Change on one side only.** The per-pixel standard deviation over the
+  samples is high where the picture keeps changing (the game) and low where it
+  does not (the streamer's room). The overlay border is where a persistent edge
+  has high change outside and low change inside. A door frame behind the
+  streamer is persistent too, but still on both sides, so it scores nothing.
+
+Neither needs a model: it is two reductions over a stack of frames, which is
+why it runs in about five seconds per clip.
+
+### Planning a camera path, not chasing a detection
+
+A crop that follows each new detection inherits the detector's noise as camera
+shake. The face-following renderer instead treats the detections as a noisy
+signal and plans the whole path first — the offline version of what a camera
+operator does:
+
+- **Median filter** — removes single-sample spikes (a false positive) without
+  delaying real moves, which a moving average would smear.
+- **Dead zone with hysteresis** — the window only moves when the face leaves
+  the middle 24% of it, so a head nodding in place produces no motion at all.
+- **Zero-phase Gaussian smoothing** — convolving the whole path forward *and*
+  centred, possible because the path is known in advance. An online filter
+  (like the old exponential blend) always lags behind the face; a centred one
+  starts easing *before* the move, which is what makes a pan look intentional.
+- **Segmenting at cuts** — smoothing across a hard cut in the source would pan
+  through it. Each stretch between cuts is smoothed on its own.
+
+Measured on the same clip: direction reversals fell from 50 to 4.
+
+### Vision-language models, and why confidence is not evidence
+
+`vision.py` sends frames to a multimodal LLM — a model whose input can be
+images as well as text — and asks what the clip is. It is good at this, and
+wrong in one predictable way: a game that looks like other games gets named
+anyway, with full confidence. Model-reported confidence is not calibrated, so
+the code does not use it. It asks for the *evidence* instead (`named_by`: text
+on screen, speech, the listing, unmistakable) and demotes any name without a
+confirming kind to a guess. That turns a probability the system cannot trust
+into a category it can check — the same move as asking a witness what they saw
+rather than how sure they are.
 
 ---
 

@@ -183,12 +183,25 @@ Each card carries its score and the exact span it was cut from.
 
 <img src="assets/screenshots/03-clips.png" alt="Four finished clips in a grid, each with a score and timestamps" width="880">
 
-### The title is yours to rewrite
+### The title knows what is on screen
 
-Every clip comes back with a title, a description, tags and an on-screen hook,
-written from what is actually said in it. All four are editable, and **Save
-changes** keeps your wording — the mp4 on your PC is renamed to match the new
-title, so what is in the folder is always what goes into YouTube's title box.
+Every clip comes back with a title, a description, tags and an on-screen hook.
+Before any of it is written, the app looks at frames from the clip and works
+out what it actually is — which game, or whether it is a podcast, a story told
+to camera, a tutorial — so the Firewatch clip from a stream titled after The
+Finals is filed under Firewatch. A game is only named when something on screen
+or in the clip confirms it. When the app can only guess, the title says "this
+horror game" rather than a name that might be wrong, and **What's in this
+clip** lets you type the real one.
+
+### Pick the title, don't settle for one
+
+Each clip gets five titles on different angles — the search phrase, the
+curiosity gap, the reaction, the exact detail, the stakes — ranked by score,
+plus a ranked list of tags to tap in and out. All of it is editable, and
+**Save changes** keeps your wording — the mp4 on your PC is renamed to match
+the new title, so what is in the folder is always what goes into YouTube's
+title box.
 
 ### When a render fails, it says what failed
 
@@ -566,16 +579,16 @@ Every clip renders as **webcam over gameplay**, because that's the format that s
         1080 × 1920
 ```
 
-The webcam isn't a hardcoded rectangle. Each clip gets its overlay **located from scratch**:
+The webcam isn't a hardcoded rectangle. Each clip gets its overlay **located from scratch**, using the one thing that tells an overlay from a game — it doesn't move:
 
-- Sample 6 frames spread across the clip
-- Run face detection, but **only inside the corner the overlay lives in** — so a character's face in the game can't win
-- Take the **median** of the hits, not the mean, so one bad frame can't drag the framing off
-- Build a crop ~5× the face width for head-and-shoulders framing
+- Sample ~20 frames: six inside the clip, the rest from the minutes around it, so the game underneath changes completely while the overlay stays put
+- The streamer is the face that **keeps turning up in the same place** — a face in the game shows up once and is outvoted
+- The overlay's **border** is an edge that is there in every sample, with moving game outside it and a still room inside
+- Crop head-and-shoulders **inside that border**, at the panel's own shape — no gameplay and no letterbox bars in the webcam panel
 
 Then the whole thing renders in **one ffmpeg pass** — crop, crop, scale, `vstack`. No per-frame Python. Clips render in seconds instead of minutes.
 
-If no face turns up anywhere, it falls back to a centre crop and says so in the log rather than silently shipping garbage.
+If the face fills the frame, there is no overlay — it's a podcast or a just-chatting segment — and that clip gets the face-following crop instead, which holds still until you actually move and then eases after you. If no face turns up anywhere, it falls back to a centre crop and says so in the log rather than silently shipping garbage.
 
 ---
 
@@ -919,12 +932,13 @@ shorts_generator/
 ├── signals.py             # loudness envelope + trigger phrases → measured hook score
 ├── boundaries.py          # snap spans to sentences; enforce the length asked for
 ├── hook_open.py           # the cold open that puts a late payoff first
-├── seo.py                 # subject detection, titles, tags, hashtags
+├── vision.py              # what each clip shows, from its frames
+├── seo.py                 # per-clip subject, ranked titles, tags, hashtags
 └── local/
     ├── downloader.py      # yt-dlp + download cache
     ├── transcriber.py     # faster-whisper + .srt cache
-    ├── llm.py             # Gemini / OpenAI + rate-limit backoff
-    ├── clipper.py         # face-tracking crop (talking-head footage)
+    ├── llm.py             # Gemini / Groq / OpenAI, text and vision, with backoff
+    ├── clipper.py         # face-following crop on a planned camera path
     └── gaming_layout.py   # webcam-over-gameplay stack (streams)
 ```
 
