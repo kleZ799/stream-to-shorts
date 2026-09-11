@@ -203,6 +203,16 @@ plus a ranked list of tags to tap in and out. All of it is editable, and
 the new title, so what is in the folder is always what goes into YouTube's
 title box.
 
+### When something fails, it tries again
+
+A download that times out, a transcription that runs out of memory once, a
+clip whose render trips over a locked file: each stage tries again by itself,
+up to three times, before a run gives up. If it still fails, **Try again**
+picks up where it stopped — nothing already downloaded, transcribed or ranked
+is done twice — and a run that finished with a clip missing offers **Retry
+failed clips**, which renders just those. Errors that trying again cannot fix,
+like a wrong API key, fail straight away so you are not kept waiting for them.
+
 ### When a render fails, it says what failed
 
 Open **Show the log** and a failed clip tells you what went wrong in the words

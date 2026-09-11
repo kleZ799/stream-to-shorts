@@ -662,6 +662,22 @@ modes are diverse and do not present uniformly in the error string.
 Know the taxonomy: **transient** (retry), **permanent** (fail fast), and
 **ambiguous** (the interesting case — did the request actually take effect?).
 
+### Retrying a whole stage, and why it is cheap here
+
+Retries usually live at the network call. This project also retries whole
+stages — a download, a transcription, one clip's render — and lets the user
+send a failed run round again. That is only affordable because every stage is
+**idempotent and resumable**: running it twice produces the same result, and
+a second run finds the first one's work in the caches (the download, the
+`.srt`, the per-chunk ranking checkpoint) and skips it. So "retry the job" is
+just "run the job", with no special recovery code at all. Designing the stages
+that way first is what made the retry button a few lines.
+
+The same classification as above decides what gets retried. A transient error
+is worth another go; a permanent one (a wrong key, a missing file) fails
+immediately, because retrying it only makes someone wait longer to read the
+same message.
+
 ### Provider fallback, and the ceiling on retrying
 
 Gemini → Groq → OpenAI. A **fallback chain**, with usage accounting to know when

@@ -1261,6 +1261,35 @@ written = await asyncio.to_thread(regenerate_seo, STORE, job, force)
 result = await asyncio.to_thread(_render)
 ```
 
+### 11.5b Trying again — by itself, then on request
+
+A run is long, and the stages in it fail for reasons that usually do not
+repeat: a host that is briefly overloaded, a transcription that runs out of
+memory once, a render that trips over a file Windows has not released yet.
+Losing forty minutes of paid-for work to one of those is the worst outcome
+the app has, so there are two layers.
+
+**Automatic.** `JobStore._attempt()` wraps the download, transcription and
+ranking: `STAGE_ATTEMPTS` (3) tries, 5s then 15s apart, each retry printed to
+the run's log with the reason. `_is_permanent()` short-circuits errors trying
+again cannot fix — an invalid API key, a spent daily quota, a private or
+unavailable video, a local file that is not there — because retrying those
+only delays the same message. Rendering is per clip: `_render()` renders the
+batch, then gives each clip that failed `CLIP_ATTEMPTS` of its own, under its
+own name (`short_03_try2_01.mp4`) so a half-written file from the failed
+attempt is never mistaken for it.
+
+**On request.** When a stage still fails, the progress panel offers **Try
+again** — `POST /api/jobs/{id}/retry` puts the same `Job` back on the queue.
+Nothing about that is special-cased, because the caches already make a second
+run resume: the download is cached, the transcript is an `.srt` beside it, and
+the ranking is checkpointed per chunk. A run that finished with some clips
+missing offers **Retry failed clips** instead (`?clips_only=true`), which sets
+`job.mode = "clips"` and has the worker re-render only those, from the source
+still on disk, putting each back in its place and renaming it to its title.
+The snapshot's `failed` and `source_on_disk` are what the page reads to decide
+which of the two to show.
+
 ### 11.6 Persistence — surviving a restart
 
 Every finished job writes a `job.json` manifest beside its clips, written to a
@@ -2438,6 +2467,7 @@ rather than guessing from what the button last did.
 | `POST …/clips/{file}/trim` | Re-cut from source at new timestamps, optionally muted |
 | `POST …/clips/{file}/save` | Copy out of the working folder into the save location |
 | `DELETE …/clips/{file}` | Delete the clip and its file |
+| `POST /api/jobs/{id}/retry` | Run a failed job again from where its caches stop it; `?clips_only=true` re-renders only a finished run's failed clips |
 | `POST /api/jobs/{id}/seo` | Write or rewrite upload metadata (`?force=true` to overwrite, `?only={file}` for one clip) |
 | `PUT …/clips/{file}/seo` | Save metadata the user typed, or a corrected `subject`; renames the mp4 to a new title |
 | `POST /api/jobs/{id}/reveal` | Show a clip in the file manager |
