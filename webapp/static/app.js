@@ -1269,8 +1269,14 @@ function onUpdate(s) {
   const at = STEPS.findIndex(([k]) => k === s.stage);
   $("steps").innerHTML = STEPS.map(([k, label], i) => {
     const cls = s.status === "done" || (at > -1 && i < at) ? "done" : (i === at ? "now" : "");
-    return `<span class="st ${cls}">${label}</span>`;
+    // The stage name carries its own animation while it is the live one —
+    // four long stages with one identical dot between them is what made a
+    // run feel stuck even when it was moving.
+    return `<span class="st st-${k} ${cls}">${label}</span>`;
   }).join("");
+
+  // A clock and a guess, so a quiet stage still shows something changing.
+  clockFrom(s);
 
   if (s.log && s.log.length) {
     const el = $("log");
@@ -1279,6 +1285,95 @@ function onUpdate(s) {
     if (stuck) el.scrollTop = el.scrollHeight;
   }
   if (s.status === "done" || s.status === "error") { renderPauseState(false); finish(s); }
+}
+
+// ---------------------------------------------------------------- the clock
+
+// Elapsed time and a guess at what is left. The server sends both, but only
+// when something changes — which during transcription can be seconds apart —
+// so the clock ticks locally from the last figure it was given.
+let clockAt = 0, clockElapsed = 0, clockEta = null, clockRunning = false, clockTimer = null;
+
+function humanTime(sec) {
+  sec = Math.max(0, Math.round(sec));
+  if (sec < 60) return `${sec}s`;
+  const m = Math.floor(sec / 60), s = sec % 60;
+  if (m < 60) return s ? `${m}m ${s}s` : `${m}m`;
+  return `${Math.floor(m / 60)}h ${m % 60}m`;
+}
+
+// Round the estimate to something honest: "about 7 min", not "6m 51s", which
+// claims a precision a guess does not have.
+function humanEta(sec) {
+  if (sec < 45) return "under a minute left";
+  if (sec < 90) return "about a minute left";
+  if (sec < 3600) return `about ${Math.round(sec / 60)} min left`;
+  const h = Math.floor(sec / 3600), m = Math.round((sec % 3600) / 60);
+  return `about ${h}h ${m}m left`;
+}
+
+function clockFrom(s) {
+  clockAt = Date.now();
+  clockElapsed = s.elapsed || 0;
+  clockEta = s.eta_seconds != null ? s.eta_seconds : null;
+  clockRunning = s.status === "running";
+  paintClock();
+  if (!clockTimer) clockTimer = setInterval(paintClock, 1000);
+  if (!clockRunning) { clearInterval(clockTimer); clockTimer = null; }
+}
+
+function paintClock() {
+  const since = (Date.now() - clockAt) / 1000;
+  const elapsed = clockElapsed + (clockRunning ? since : 0);
+  const eta = clockEta == null ? null : Math.max(0, clockEta - since);
+  const parts = [];
+  if (elapsed > 0) parts.push(`${humanTime(elapsed)} so far`);
+  if (clockRunning && eta != null) parts.push(humanEta(eta));
+  $("pTime").textContent = parts.join(" · ");
+}
+
+// ---------------------------------------------------------------- carrying on
+
+// A run that was going when the app closed. Everything it had already done is
+// on disk, so it is offered back rather than lost.
+async function checkInterrupted() {
+  try {
+    const d = await api("/api/jobs");
+    const stuck = (d.jobs || []).filter((j) => j.resumable);
+    const bar = $("resumeBar");
+    if (!stuck.length) { bar.classList.add("hidden"); return; }
+    const j = stuck[0];
+    // A local run has no video title, and a full path is unreadable in a
+    // sentence — the file's own name is what someone recognises.
+    const what = j.source_title || (j.source || "").split(/[\\/]/).pop() || "your video";
+    bar.innerHTML = `
+      <div class="rb-text">
+        <b>A run didn't finish.</b>
+        ${esc(what)} — it stopped while ${esc((j.stage_label || "working").toLowerCase())}.
+        Carrying on skips everything it already did.
+      </div>
+      <div class="rb-act">
+        <button class="btn primary sm" id="rbGo">Resume</button>
+        <button class="btn ghost sm" id="rbNo">Dismiss</button>
+      </div>`;
+    bar.classList.remove("hidden");
+    $("rbNo").onclick = () => bar.classList.add("hidden");
+    $("rbGo").onclick = async () => {
+      $("rbGo").disabled = true;
+      try {
+        await api(`/api/jobs/${encodeURIComponent(j.id)}/continue`, { method: "POST" });
+        bar.classList.add("hidden");
+        $("go").disabled = true;
+        $("go").textContent = "Working…";
+        $("progress").classList.remove("hidden");
+        $("progress").scrollIntoView({ behavior: "smooth", block: "center" });
+        follow(j.id);
+      } catch (e) {
+        showErr(e.message);
+        $("rbGo").disabled = false;
+      }
+    };
+  } catch (_) { /* an offline check is not worth blocking the page for */ }
 }
 
 let finished = null;
@@ -2306,6 +2401,7 @@ keyLinkFor($("setProvider").value);
 checkSetup();
 refreshUsage();
 loadProcessor();
+checkInterrupted();
 loadLocations();
 refreshPreview();
 

@@ -159,6 +159,9 @@
       <div class="col-main">
 
         <!-- 1 · source -->
+        <!-- Shown only when a run was still going when the app last closed. -->
+        <div class="resume-bar hidden" id="resumeBar"></div>
+
         <section class="panel" id="secCreate">
           <div class="p-head">
             <h2><span class="step">1</span>Source</h2>
@@ -303,6 +306,7 @@
     <section class="panel hidden" id="progress">
       <div class="p-head">
         <h2><span class="spin"></span><span id="stageLabel">Queued</span></h2>
+        <span class="ptime" id="pTime"></span>
         <span class="pct" id="pct">0%</span>
       </div>
       <div class="bar"><i id="barFill"></i></div>
