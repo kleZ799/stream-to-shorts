@@ -1033,6 +1033,22 @@ async def save_clip(job_id: str, filename: str, req: SaveClipRequest) -> dict:
 
 # --- trying again ---------------------------------------------------------
 
+@app.post("/api/jobs/{job_id}/continue")
+async def continue_job(job_id: str) -> dict:
+    """Carry on a run the app never finished.
+
+    Distinct from /resume, which lifts a pause. This one is for a run that
+    was going when the app closed: it goes back on the queue and skips
+    everything already cached on disk.
+    """
+    job = _job_or_404(job_id)
+    try:
+        job = STORE.carry_on(job)
+    except ValueError as e:
+        raise HTTPException(409, str(e))
+    return job.snapshot()
+
+
 @app.post("/api/jobs/{job_id}/retry")
 async def retry_job(job_id: str, clips_only: bool = False) -> dict:
     """Run a failed job again, or only the clips in a finished one that failed.

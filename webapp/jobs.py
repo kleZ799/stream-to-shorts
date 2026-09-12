@@ -251,6 +251,10 @@ class Job:
     # so moving the save location can't strand the ones already rendered.
     folder: Optional[str] = None
     restored: bool = False
+    # When the work actually started and stopped, so the page can show a
+    # clock and a guess at what is left rather than a still 0%.
+    started_at: Optional[float] = None
+    finished_at: Optional[float] = None
     # "full" runs every stage; "clips" re-renders only the clips that failed.
     mode: str = "full"
     _version: int = 0
@@ -289,18 +293,54 @@ class Job:
             "failed": sum(1 for c in self.clips
                           if not c.get("url") and c.get("start_time") is not None),
             "source_on_disk": bool(self.source_path and os.path.exists(self.source_path)),
+            # A run the app never finished, which still knows what it was
+            # making. The page offers to carry it on.
+            "resumable": self.status == "interrupted" and bool(self.source),
+            "started_at": self.started_at,
+            "elapsed": (round((self.finished_at or time.time()) - self.started_at, 1)
+                        if self.started_at else None),
+            "eta_seconds": self.eta_seconds(),
             "paused": self.status == "running" and proc.is_paused(),
             "log": self.log[-60:],
             "version": self._version,
         }
 
+    def eta_seconds(self) -> Optional[int]:
+        """Seconds left, from how long the work so far has actually taken.
+
+        Deliberately naive -- elapsed x remaining/done -- because the stage
+        bands are already sized by how long each stage usually takes, and a
+        guess that corrects itself every second beats a model that is
+        confidently wrong. Nothing is offered until there is enough progress
+        for the number to mean anything: an estimate from 2% is noise, and
+        noise in a number somebody is waiting on is worse than no number.
+        """
+        if self.status != "running" or not self.started_at:
+            return None
+        done = max(0.0, min(1.0, self.progress))
+        elapsed = time.time() - self.started_at
+        if done < 0.04 or elapsed < 8:
+            return None
+        return int(elapsed * (1 - done) / done)
+
     def manifest(self) -> Dict:
-        """Everything needed to rebuild this job in a later session."""
+        """Everything needed to rebuild this job in a later session.
+
+        Written when the run starts and at every stage, not only when it
+        finishes -- a run that was going when the app closed has to leave
+        enough behind to be offered back. `status` and `stage` are what say
+        so: a manifest still reading "running" on the next launch means the
+        app did not get to finish it.
+        """
         return {
             "id": self.id,
             "created_at": self.created_at,
+            "status": self.status,
+            "stage": self.stage,
             "source": self.source,
             "source_path": self.source_path,
+            "download_format": self.download_format,
+            "language": self.language,
             "video_meta": self.video_meta,
             "subject": self.subject,
             "spec": self.spec.to_dict(),
@@ -328,6 +368,10 @@ class JobStore:
         with self._lock:
             self._jobs[job.id] = job
         os.makedirs(job.out_dir, exist_ok=True)
+        # On record before any work starts, so a crash in the first minute
+        # still leaves a run that can be carried on rather than a folder
+        # nobody can explain.
+        self._persist(job)
         self._queue.put(job.id)
         depth = self._queue.qsize()
         if depth > 1:
@@ -344,7 +388,7 @@ class JobStore:
         # A finished run with nothing left in it is just an empty folder — the
         # user deleted every clip. Don't show it as a row with no contents.
         return [j.snapshot() for j in jobs
-                if j.clips or j.status in ("queued", "running", "error")]
+                if j.clips or j.status in ("queued", "running", "error", "interrupted")]
 
     def clip(self, job: Job, filename: str) -> Optional[Dict]:
         with self._lock:
@@ -399,6 +443,32 @@ class JobStore:
             job.message = "Queued — trying again"
             job.clips = []
             job.log.append("--- trying again ---")
+            job._version += 1
+        self._queue.put(job.id)
+        return job
+
+    def carry_on(self, job: Job) -> Job:
+        """Finish a run the app never finished.
+
+        Nothing special happens here, and that is the point: the stages are
+        idempotent and every expensive one is cached, so putting the same job
+        back on the queue skips whatever it had already done -- the download,
+        the transcript, the chunks of ranking that were checkpointed -- and
+        picks up at the first thing it had not.
+        """
+        with self._lock:
+            if job.status in ("queued", "running"):
+                raise ValueError("That run is already going.")
+            if job.status not in ("interrupted", "error"):
+                raise ValueError("That run finished — there is nothing to carry on.")
+            if not job.source:
+                raise ValueError("That run is too old to carry on: it does not record "
+                                 "what it was made from. Start it again from the video.")
+            job.mode = "full"
+            job.status, job.stage, job.progress = "queued", "queued", 0.0
+            job.error = None
+            job.message = "Queued — carrying on where it stopped"
+            job.log.append("--- carrying on after the app closed ---")
             job._version += 1
         self._queue.put(job.id)
         return job
@@ -528,7 +598,13 @@ class JobStore:
                 "seo": None,
             })
 
-        if not clips:
+        # A manifest still reading "running" or "queued" belongs to a run the
+        # app never finished -- it closed, crashed, or the machine went down.
+        # Worth restoring even with no clips yet: the download, the transcript
+        # and the ranking checkpoint it already paid for are all still on
+        # disk, so carrying on costs only what was left.
+        unfinished = str(manifest.get("status") or "") in ("queued", "running")
+        if not clips and not unfinished:
             return None
 
         try:
@@ -541,10 +617,16 @@ class JobStore:
             id=job_id,
             source=str(manifest.get("source") or ""),
             spec=LayoutSpec.from_dict(manifest.get("spec")),
-            status="done",
-            stage="done",
-            progress=1.0,
-            message=f"{len(clips)} clip(s) ready",
+            download_format=str(manifest.get("download_format") or "best"),
+            language=manifest.get("language"),
+            status="interrupted" if unfinished else "done",
+            stage=str(manifest.get("stage") or "queued") if unfinished else "done",
+            progress=0.0 if unfinished else 1.0,
+            message=(
+                "Interrupted — the app closed while "
+                + _STAGE_LABELS.get(str(manifest.get("stage") or ""), "working").lower()
+                if unfinished else f"{len(clips)} clip(s) ready"
+            ),
             source_path=source_path if source_path and os.path.exists(source_path) else None,
             clips=clips,
             video_meta=manifest.get("video_meta") or {},
@@ -560,8 +642,10 @@ class JobStore:
     def _update(self, job: Job, *, stage: Optional[str] = None,
                 frac: Optional[float] = None, message: Optional[str] = None) -> None:
         """Advance a job's reported state. `frac` is progress *within* the stage."""
+        moved = False
         with self._lock:
             if stage:
+                moved = stage != job.stage
                 job.stage = stage
             if message:
                 job.message = message
@@ -571,6 +655,11 @@ class JobStore:
             else:
                 job.progress = max(job.progress, lo + (hi - lo) * max(0.0, min(1.0, frac)))
             job._version += 1
+        # Each stage boundary is a place worth being able to come back to, and
+        # there are four of them in a run -- cheap to write, and the
+        # difference between resuming a crashed run and starting over.
+        if moved:
+            self._persist(job)
 
     def _log(self, job: Job, line: str) -> None:
         line = line.rstrip()
@@ -582,6 +671,27 @@ class JobStore:
 
         for pattern, stage in _PREFIX_STAGE:
             if re.match(pattern, line):
+                # Download and transcription each report a percentage of their
+                # own now, and the download also says how fast it is going --
+                # which is the number somebody watching a multi-gigabyte VOD
+                # actually wants. Without these two the bar sat at 0% through
+                # the two longest stages in the run.
+                if stage in ("download", "transcribe"):
+                    pct = re.search(r"(\d{1,3}(?:\.\d+)?)\s*%", line)
+                    if not pct:
+                        self._update(job, stage=stage,
+                                     message=_STAGE_LABELS.get(stage, stage))
+                        break
+                    frac = min(1.0, float(pct.group(1)) / 100.0)
+                    message = f"{_STAGE_LABELS.get(stage, stage)} {int(float(pct.group(1)))}%"
+                    speed = re.search(r"\bat\s+([\d.]+[KMG]?B/s)", line)
+                    if speed:
+                        message += f" at {speed.group(1)}"
+                    left = re.search(r"-\s*([\dhms]+)\s*left", line)
+                    if left:
+                        message += f", {left.group(1)} left"
+                    self._update(job, stage=stage, frac=frac, message=message)
+                    break
                 # "[stack] 2/5: ..." gives exact render progress, and
                 # "[highlights] chunk 2/12" gives the same for a chunked
                 # rank. Both patterns are narrow on purpose. The rank one has
@@ -615,6 +725,9 @@ class JobStore:
             job = self.get(job_id)
             if job is None:
                 continue
+            with self._lock:
+                job.started_at = time.time()
+                job.finished_at = None
             try:
                 self._execute(job)
             except Exception as e:
@@ -625,6 +738,8 @@ class JobStore:
                     job.log.append(traceback.format_exc())
                     job._version += 1
             finally:
+                with self._lock:
+                    job.finished_at = time.time()
                 # A job that ended while paused must not leave the gate shut,
                 # or the next one starts and immediately blocks on a pause
                 # nobody can see or lift.
