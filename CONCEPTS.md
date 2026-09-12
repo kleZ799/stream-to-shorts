@@ -925,6 +925,21 @@ is what happens when a design assumption (programs have a terminal) meets a
 context that breaks it. The general lesson is that a child inherits more from
 its parent than its arguments, and packaging changes what it inherits.
 
+**Silence is the same problem.** A stage that says nothing for ten minutes is
+indistinguishable from a stage that has hung, and people kill processes they
+believe are hung. Two of the four stages here used to be silent — the download
+because the library's own progress bar was switched off, transcription because
+it only spoke when it finished — so the fix was to make each one narrate: a
+percentage, a speed, a position in the audio. The general rule: **work that
+takes longer than a few seconds owes the person a signal that is changing**,
+and it has to come from the work itself rather than from an animation that
+would keep spinning if the work had died.
+
+An estimate is a stronger claim than a heartbeat, so it is made carefully:
+elapsed x remaining/done, recomputed every second, shown only past a few
+percent, and rounded to "about 7 min" because a guess that says 6m 51s is
+lying about its own precision.
+
 **Trust is a user-facing property, not a technical one.** Black windows
 appearing and vanishing during a render broke nothing. It also made a
 legitimate program look like malware to the people running it, which is a real

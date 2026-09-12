@@ -222,6 +222,28 @@ title box.
 
 <img src="assets/screenshots/05-boost.png" alt="The Boost panel on a Firewatch clip: what the clip is filed under, the chosen title, and five ranked title options with their scores and angles" width="880">
 
+### You can see it working
+
+A long video used to sit at 0% for ten minutes with nothing to look at. Now
+every stage reports itself:
+
+- **Fetching** shows how much of the video has arrived, how fast it is coming
+  and how long that leaves — "42% of 1.2GB at 8.4MB/s, 1m21s left".
+- **Transcribing** counts through the audio — "42% — 14m21s of 34m12s" — which
+  is the longest stage and used to be the most silent.
+- **Ranking** and **Rendering** count their chunks and clips.
+- Each stage animates while it is the live one, and the header shows **time so
+  far and about how long is left**, worked out from how long this run has
+  actually taken rather than a guess baked in months ago.
+
+### If the app closes mid-run, carry on
+
+Close the app, lose power, or have it crash halfway through a two-hour VOD,
+and the next launch offers the run back: **"A run didn't finish… Resume"**.
+Carrying on skips everything already done — the download, the transcript, and
+the ranking chunk by chunk — so it picks up near where it stopped instead of
+starting the whole thing again.
+
 ### When something fails, it tries again
 
 A download that times out, a transcription that runs out of memory once, a

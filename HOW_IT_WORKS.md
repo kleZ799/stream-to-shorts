@@ -1362,6 +1362,18 @@ batch, then gives each clip that failed `CLIP_ATTEMPTS` of its own, under its
 own name (`short_03_try2_01.mp4`) so a half-written file from the failed
 attempt is never mistaken for it.
 
+**After a crash.** The same property makes a *closed app* recoverable, and for
+free. A job's manifest used to be written only when the run finished, so a run
+killed halfway left a folder nobody could explain. It is now written when the
+job is created and at every stage boundary, carrying `status` and `stage`. On
+the next launch, `_job_from_folder()` reads a manifest still saying "running"
+as an **interrupted** run — restored even with no clips yet — and the page
+offers it back. `POST /api/jobs/{id}/continue` (`carry_on()`) puts it on the
+queue, and because every stage is idempotent and cached, it walks past the
+download, the transcript and the checkpointed ranking chunks to the first
+thing it had not done. Measured on a run killed during ranking: resumed and
+finished in 98s, with the download and transcription skipped entirely.
+
 **On request.** When a stage still fails, the progress panel offers **Try
 again** — `POST /api/jobs/{id}/retry` puts the same `Job` back on the queue.
 Nothing about that is special-cased, because the caches already make a second
@@ -2632,6 +2644,7 @@ rather than guessing from what the button last did.
 | `POST …/clips/{file}/trim` | Re-cut from source at new timestamps, optionally muted |
 | `POST …/clips/{file}/save` | Copy out of the working folder into the save location |
 | `DELETE …/clips/{file}` | Delete the clip and its file |
+| `POST /api/jobs/{id}/continue` | Carry on a run the app never finished (distinct from `/resume`, which lifts a pause) |
 | `GET /api/processor` | What video encoding and transcription will run on, and why (`?recheck=true` re-tests the encoders) |
 | `POST /api/processor` | Set `auto`, `gpu` or `cpu`; applies from the next clip, even on a paused run |
 | `POST /api/jobs/{id}/retry` | Run a failed job again from where its caches stop it; `?clips_only=true` re-renders only a finished run's failed clips |
