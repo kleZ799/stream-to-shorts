@@ -5,6 +5,7 @@ directly off disk.
 """
 import os
 import re
+import time
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 from typing import Dict, List, Optional
@@ -22,6 +23,70 @@ def _import_ytdlp():
             "    pip install -r requirements-local.txt"
         ) from e
     return yt_dlp
+
+
+def _size(n: Optional[float]) -> str:
+    """Bytes as something a person reads: 1.2GB, 840MB, 12MB."""
+    try:
+        n = float(n or 0)
+    except (TypeError, ValueError):
+        return "?"
+    for unit in ("B", "KB", "MB", "GB"):
+        if n < 1024 or unit == "GB":
+            return f"{n:.0f}{unit}" if unit in ("B", "KB") else f"{n:.1f}{unit}"
+        n /= 1024
+    return f"{n:.1f}GB"
+
+
+def _clock(seconds: Optional[float]) -> str:
+    try:
+        s = int(float(seconds or 0))
+    except (TypeError, ValueError):
+        return "?"
+    h, rem = divmod(s, 3600)
+    m, sec = divmod(rem, 60)
+    return f"{h}h{m:02d}m" if h else (f"{m}m{sec:02d}s" if m else f"{sec}s")
+
+
+# Printed at most this often. A fragment hook fires dozens of times a second
+# on a fast connection, and every line is a line in the run's log.
+_PROGRESS_EVERY = 1.0
+_last_progress = [0.0]
+
+
+def _progress_line(d: Dict) -> None:
+    """One readable line about a download in flight: how far, how fast, how long left.
+
+    Never raises: a progress line that throws would take the download with it.
+    """
+    try:
+        status = d.get("status")
+        if status == "finished":
+            _last_progress[0] = 0.0
+            print(f"[download] got {_size(d.get('total_bytes') or d.get('downloaded_bytes'))}"
+                  f" in {_clock(d.get('elapsed'))}", flush=True)
+            return
+        if status != "downloading":
+            return
+        now = time.time()
+        if now - _last_progress[0] < _PROGRESS_EVERY:
+            return
+        _last_progress[0] = now
+
+        done = float(d.get("downloaded_bytes") or 0)
+        total = float(d.get("total_bytes") or d.get("total_bytes_estimate") or 0)
+        speed = d.get("speed")
+        pct = f"{100 * done / total:.1f}%" if total else _size(done)
+        parts = [f"[download] {pct}"]
+        if total:
+            parts.append(f"of {_size(total)}")
+        if speed:
+            parts.append(f"at {_size(speed)}/s")
+        if d.get("eta"):
+            parts.append(f"- {_clock(d['eta'])} left")
+        print(" ".join(parts), flush=True)
+    except Exception:
+        pass
 
 
 def _format_for(fmt: str) -> str:
@@ -322,7 +387,17 @@ def download_youtube_local(video_url: str, fmt: str = "720", out_dir: Optional[s
         "merge_output_format": "mp4/mkv",
         "quiet": True,
         "no_warnings": True,
+        # yt-dlp's own carriage-return progress bar is useless here -- it is
+        # captured line by line into a log -- but the numbers behind it are
+        # exactly what somebody staring at a stalled-looking app wants. So its
+        # bar stays off and the hook below prints a line a second instead.
         "noprogress": True,
+        "progress_hooks": [_progress_line],
+        # A multi-gigabyte VOD arrives as thousands of fragments, and fetching
+        # them one at a time leaves most of the connection idle. Four at once
+        # is the usual sweet spot: measurably faster on every connection, and
+        # not so many that YouTube starts throttling.
+        "concurrent_fragment_downloads": 4,
     }
 
     def _run(opts):

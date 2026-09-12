@@ -5,6 +5,7 @@ expects: {duration, segments[start, end, text]}.
 """
 import os
 import re
+import time
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -183,6 +184,14 @@ def _load_srt_cache(cache_path: Path) -> Dict:
     return {"duration": duration, "segments": segments}
 
 
+def _mmss(seconds: float) -> str:
+    """Seconds as 34m12s / 12s, for progress lines."""
+    s = int(float(seconds or 0))
+    h, rem = divmod(s, 3600)
+    m, sec = divmod(rem, 60)
+    return f"{h}h{m:02d}m" if h else (f"{m}m{sec:02d}s" if m else f"{sec}s")
+
+
 def _resolve_device() -> str:
     """Where transcription runs, under the Processor setting -- see accel.py.
 
@@ -259,6 +268,12 @@ def transcribe_local(media_path: str, language: Optional[str] = None) -> Dict:
         """
         model = WhisperModel(LOCAL_WHISPER_MODEL, device=dev, compute_type=ct)
         segments_iter, info = model.transcribe(**transcribe_kwargs)
+        # The longest stage by far, and until now it said nothing at all
+        # between "transcribing on the CPU" and its result -- half an hour of
+        # an app that looks stuck. The segments arrive in order, so each one
+        # says how far in we are.
+        total = float(getattr(info, "duration", 0.0) or 0.0)
+        last_said = 0.0
         out = []
         for s in segments_iter:
             # Transcription runs inside this process, so Pause cannot suspend
@@ -266,6 +281,11 @@ def transcribe_local(media_path: str, language: Optional[str] = None) -> Dict:
             # holding here stops the model decoding the next window, on the
             # CPU or the GPU alike, until the run is resumed.
             proc.wait_if_paused()
+            now = time.time()
+            if total and now - last_said >= 2.5:
+                last_said = now
+                print(f"[transcribe/local] {min(99, int(100 * float(s.end) / total))}% "
+                      f"- {_mmss(s.end)} of {_mmss(total)}", flush=True)
             out.append({
                 "start": float(s.start),
                 "end": float(s.end),
